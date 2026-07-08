@@ -1,0 +1,98 @@
+// Prisma schema — the single source of truth for data shape (ADR-011's Pothos
+// Prisma plugin generates GraphQL types directly from these models, so there
+// is no separately hand-maintained GraphQL SDL file). SQLite for this POC,
+// with the datasource abstracted so switching to Postgres later is a config
+// change, not a rewrite (ADR-003).
+
+// Prisma 7's client generator requires an explicit local output path (it no
+// longer generates into node_modules/@prisma/client) — see prisma.config.ts
+// for the actual connection URL, which Prisma 7 moved out of this file.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Generates the Prisma<->Pothos type-mapping file the Pothos Prisma plugin
+// needs (ADR-011) — being verified for Prisma 7 compatibility at Phase 1
+// scaffolding time, since this is a very new pairing with no confirmed
+// compatibility statement from either project as of 2026-07-08.
+//
+// clientOutput MUST be set explicitly: without it, this generator bakes an
+// absolute machine-specific filesystem path into the generated file's import
+// statement (a real bug, reproduced during this project's own scaffolding —
+// see decisions.md). "./prisma" is relative to this generator's own output
+// file, both of which land as siblings under src/generated/.
+generator pothos {
+  provider     = "prisma-pothos-types"
+  output       = "../src/generated/pothos-prisma-types.ts"
+  clientOutput = "./prisma/client.js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id               String   @id @default(uuid())
+  fullName         String
+  email            String   @unique
+  age              Int?
+  gender           String?
+  location         String?
+  registrationStep Int      @default(1) // 1|2|3 — resumable registration wizard
+  createdAt        DateTime @default(now())
+
+  enrollments          BiometricEnrollment[]
+  attendance           AttendanceRecord[]
+  verificationAttempts VerificationAttempt[]
+
+  // No password field anywhere — biometric verification IS the login (ADR-004).
+}
+
+model BiometricEnrollment {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // "FACE_LEFT" | "FACE_RIGHT" | "FACE_FRONTAL" | "FINGERPRINT_FLAG"
+  embedding String? // JSON-stringified Float32 array; null for FINGERPRINT_FLAG
+  imageUri  String? // optional reference image path, for audit/debugging
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AttendanceRecord {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       String // YYYY-MM-DD, for easy per-day grouping (ADR-016)
+  type       String // "CHECK_IN" | "CHECK_OUT" — server-inferred, not client-supplied (ADR-016)
+  timestamp  DateTime @default(now())
+  method     String // "FINGERPRINT" | "FACE"
+  matchScore Float? // cosine similarity, FACE only — audit trail
+  latitude   Float? // nullable — a denied location permission must not block punch-in (ADR-016)
+  longitude  Float?
+
+  // Punch-type inference and the duplicate-punch guard both query "this user's
+  // records for today" (ADR-016) — indexed for that lookup. The unique
+  // constraint is the DB-level backstop for the same guard: the application
+  // check alone has a race window between two concurrent requests for the
+  // same user/day/type; this makes a duplicate impossible even then.
+  @@index([userId, date])
+  @@unique([userId, date, type])
+}
+
+model VerificationAttempt {
+  // Logs every face/fingerprint verification attempt, success AND failure —
+  // not just successful punches (ADR-019). userId is nullable because a
+  // failed `identify` lookup may not resolve to a known account.
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method     String // "FINGERPRINT" | "FACE"
+  outcome    String // "SUCCESS" | "FAILURE"
+  matchScore Float? // face only
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+}
