@@ -96,6 +96,11 @@ catalog:
   # v5-compatible immediately before use, per ADR-006's own caveat — not
   # assumed from the version recorded when tech-stack.md was first written.
   react-native-vision-camera-face-detector: ^2.0.5
+  # TFLite runtime for the face-embedding model (task 2.4, ADR-006). No
+  # reanimated/worklets-core peer (verified before adding, given ADR-028's
+  # crash history) — its only peer is react-native-nitro-modules, already
+  # installed.
+  react-native-fast-tflite: ^3.0.1
 
 minimumReleaseAgeExclude:
   - '@turbo/darwin-64@2.10.4'

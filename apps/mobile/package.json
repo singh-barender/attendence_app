@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "main": "index.ts",
   "dependencies": {
+    "@attendance-app/face-matching": "workspace:*",
     "@attendance-app/shared-types": "workspace:*",
     "@graphql-typed-document-node/core": "catalog:",
     "@react-navigation/native": "^7.3.7",
@@ -24,6 +25,7 @@
     "graphql-request": "catalog:",
     "react": "19.2.3",
     "react-native": "0.86.0",
+    "react-native-fast-tflite": "catalog:",
     "react-native-nitro-image": "^0.15.1",
     "react-native-nitro-modules": "^0.36.1",
     "react-native-safe-area-context": "~5.7.0",
