@@ -1,0 +1,21 @@
+query AttendanceHistory {
+  attendanceHistory {
+    date
+    status
+    hoursWorked
+    checkIn {
+      id
+      timestamp
+      method
+      latitude
+      longitude
+    }
+    checkOut {
+      id
+      timestamp
+      method
+      latitude
+      longitude
+    }
+  }
+}

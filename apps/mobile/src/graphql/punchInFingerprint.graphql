@@ -1,0 +1,18 @@
+mutation PunchInFingerprint($userId: ID!, $latitude: Float, $longitude: Float) {
+  punchInFingerprint(userId: $userId, latitude: $latitude, longitude: $longitude) {
+    matched
+    bestScore
+    type
+    token
+    record {
+      id
+      date
+      type
+      method
+      timestamp
+      matchScore
+      latitude
+      longitude
+    }
+  }
+}

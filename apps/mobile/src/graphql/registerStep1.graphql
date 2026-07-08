@@ -1,0 +1,18 @@
+mutation RegisterStep1(
+  $email: String!
+  $fullName: String!
+  $age: Int
+  $gender: String
+  $location: String
+) {
+  registerStep1(
+    email: $email
+    fullName: $fullName
+    age: $age
+    gender: $gender
+    location: $location
+  ) {
+    id
+    registrationStep
+  }
+}
