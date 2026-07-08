@@ -12,10 +12,22 @@
  * the embedder (task 2.4) build on next. `yuv` is used because both ML Kit
  * and LiteRT (the tflite runtime task 2.4 will use) natively consume YUV,
  * per react-native-vision-camera's own guidance — avoids an extra conversion
- * once real per-frame ML work lands. The on-screen frame counter exists to
- * make "the pipeline is actually alive on this device" independently
- * verifiable, not just assumed from the code compiling.
+ * once real per-frame ML work lands.
+ *
+ * Task 2.2 adds real ML Kit face detection (`useFaceDetector().detectFaces`)
+ * inside that same per-frame worklet, rather than a second `CameraOutput` —
+ * one frame pipeline doing one detection pass, not two independent ones
+ * competing for the same frames. `runClassifications: true` is enabled now
+ * (not deferred) since it's what task 2.5/2.6's liveness blink-detection
+ * needs (`leftEyeOpenProbability`/`rightEyeOpenProbability`) — a concrete,
+ * already-decided near-term need (ADR-018), not speculative. `pitchAngle`/
+ * `rollAngle`/`yawAngle` and `bounds` are always present on a detected
+ * `Face`, no flag needed — task 2.7's enrollment quality gate (centering)
+ * and 2.5/2.6's head-turn liveness will read those directly. The on-screen
+ * debug readout exists to make "real ML Kit data is actually flowing on
+ * this device" independently verifiable, not just assumed from a compile.
  */
+
 import { useRef, useState } from 'react';
 import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +38,7 @@ import {
   useFrameOutput,
   usePhotoOutput,
 } from 'react-native-vision-camera';
+import { useFaceDetector } from 'react-native-vision-camera-face-detector';
 import { scheduleOnRN } from 'react-native-worklets';
 import { Button, H1, Image, Spinner, Text, YStack } from 'tamagui';
 import { FeedbackBanner } from '../../components/FeedbackBanner';
@@ -37,12 +50,21 @@ import { getErrorMessage } from '../../services/graphqlError';
 const PLACEHOLDER_EMBEDDING = [0];
 
 /**
- * The frame counter is a debug readout, not a data source anything depends
- * on — updating React state on every single camera frame (30-60/sec) would
- * cause excessive re-renders for no benefit, so JS-side updates are
+ * The frame/face counters are a debug readout, not a data source anything
+ * depends on — updating React state on every single camera frame (30-60/sec)
+ * would cause excessive re-renders for no benefit, so JS-side updates are
  * throttled to this interval regardless of how often frames actually arrive.
  */
 const FRAME_STATUS_UPDATE_INTERVAL_MS = 500;
+
+/** Minimal per-frame face summary for the debug readout — real fields task
+ * 2.5 (liveness) and 2.7 (quality gate) will read directly off `Face` itself. */
+interface FaceDebugSummary {
+  count: number;
+  leftEyeOpen: number | null;
+  rightEyeOpen: number | null;
+  yawAngle: number | null;
+}
 
 const ANGLES = ['left', 'right', 'frontal'] as const;
 type Angle = (typeof ANGLES)[number];
@@ -64,38 +86,51 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
   const photoOutput = usePhotoOutput();
   const [photos, setPhotos] = useState<Partial<Record<Angle, string>>>({});
   const [captureError, setCaptureError] = useState<string | null>(null);
-  const [frameStats, setFrameStats] = useState<{ count: number; width: number; height: number }>({
-    count: 0,
-    width: 0,
-    height: 0,
-  });
+  const [frameStats, setFrameStats] = useState<{
+    count: number;
+    width: number;
+    height: number;
+    face: FaceDebugSummary | null;
+  }>({ count: 0, width: 0, height: 0, face: null });
   const totalFramesSeenRef = useRef(0);
   const lastFrameStatusUpdateRef = useRef(0);
+
+  const faceDetector = useFaceDetector({ performanceMode: 'fast', runClassifications: true });
 
   /**
    * Runs on the RN/JS thread (scheduled from the frame-output worklet below)
    * for every frame — the total count is exact, but re-rendering React state
-   * is throttled since that's the actually-expensive part. Task 2.2+'s real
-   * per-frame ML work will replace this with its own worklet-side pacing;
-   * this debug counter's per-frame `scheduleOnRN` cost is acceptable only
-   * because it's temporary and this screen's camera is active for seconds,
-   * not continuously.
+   * is throttled since that's the actually-expensive part. Task 2.5+'s real
+   * per-frame liveness work will replace this with its own worklet-side
+   * pacing; this debug readout's per-frame `scheduleOnRN` cost is acceptable
+   * only because it's temporary and this screen's camera is active for
+   * seconds, not continuously.
    */
-  function recordFrameSeen(width: number, height: number) {
+  function recordFrameSeen(width: number, height: number, face: FaceDebugSummary | null) {
     totalFramesSeenRef.current += 1;
     const now = Date.now();
     if (now - lastFrameStatusUpdateRef.current < FRAME_STATUS_UPDATE_INTERVAL_MS) {
       return;
     }
     lastFrameStatusUpdateRef.current = now;
-    setFrameStats({ count: totalFramesSeenRef.current, width, height });
+    setFrameStats({ count: totalFramesSeenRef.current, width, height, face });
   }
 
   const frameOutput = useFrameOutput({
     pixelFormat: 'yuv',
     onFrame(frame) {
       'worklet';
-      scheduleOnRN(recordFrameSeen, frame.width, frame.height);
+      const faces = faceDetector.detectFaces(frame);
+      const firstFace = faces[0];
+      const faceSummary: FaceDebugSummary | null = firstFace
+        ? {
+            count: faces.length,
+            leftEyeOpen: firstFace.leftEyeOpenProbability ?? null,
+            rightEyeOpen: firstFace.rightEyeOpenProbability ?? null,
+            yawAngle: firstFace.yawAngle,
+          }
+        : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null };
+      scheduleOnRN(recordFrameSeen, frame.width, frame.height, faceSummary);
       frame.dispose();
     },
   });
@@ -192,7 +227,15 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             {frameStats.count > 0 ? (
               <Text color="$color10" fontSize="$1">
                 Frame pipeline: {frameStats.count} frames seen ({frameStats.width}x
-                {frameStats.height})
+                {frameStats.height}) — {frameStats.face?.count ?? 0} face(s)
+                {frameStats.face?.count ? (
+                  <>
+                    {' '}
+                    (eyes: L {frameStats.face.leftEyeOpen?.toFixed(2) ?? '—'} R{' '}
+                    {frameStats.face.rightEyeOpen?.toFixed(2) ?? '—'}, yaw:{' '}
+                    {frameStats.face.yawAngle?.toFixed(1) ?? '—'}°)
+                  </>
+                ) : null}
               </Text>
             ) : null}
             <Button onPress={handleCapture} mt="$2">

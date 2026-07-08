@@ -87,6 +87,9 @@ catalogs:
     prisma:
       specifier: ^7.8.0
       version: 7.8.0
+    react-native-vision-camera-face-detector:
+      specifier: ^2.0.5
+      version: 2.0.5
     react-native-vision-camera-worklets:
       specifier: ^5.1.0
       version: 5.1.0
@@ -206,6 +209,9 @@ importers:
       react-native-vision-camera:
         specifier: ^5.1.0
         version: 5.1.0(3f6800fbae98ba4a15f57013b37fbe2d)
+      react-native-vision-camera-face-detector:
+        specifier: 'catalog:'
+        version: 2.0.5(react-native-nitro-modules@0.36.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native-vision-camera@5.1.0(3f6800fbae98ba4a15f57013b37fbe2d))(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       react-native-vision-camera-worklets:
         specifier: 'catalog:'
         version: 5.1.0(react-native-nitro-modules@0.36.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native-vision-camera@5.1.0(3f6800fbae98ba4a15f57013b37fbe2d))(react-native-worklets@0.10.2(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
@@ -6475,6 +6481,14 @@ packages:
     peerDependencies:
       react: '*'
       react-native: '>=0.82.0'
+
+  react-native-vision-camera-face-detector@2.0.5:
+    resolution: {integrity: sha512-8X7GDzDTu5AzMBW0fT6uHUvvjmD4JYyTzkZp7O0SFlNHTg8/XSlUkQi1RtOF8jwCs2JIXu1KEM+Ovh+Itf5T1g==}
+    peerDependencies:
+      react: '>= 18'
+      react-native: '>= 0.74'
+      react-native-nitro-modules: '>= 0.35'
+      react-native-vision-camera: '>= 5.0'
 
   react-native-vision-camera-worklets@5.1.0:
     resolution: {integrity: sha512-BqHsV7anweEHJhIByQUPolq3zKjJT7uJx64cKYbIVnkvo94EOcoMJDOzTgIAroDBjkDO+PqhDhURxCIUWUtv4Q==}
@@ -15670,6 +15684,13 @@ snapshots:
       react-freeze: 1.0.4(react@19.2.3)
       react-native: 0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1)
       warn-once: 0.1.1
+
+  react-native-vision-camera-face-detector@2.0.5(react-native-nitro-modules@0.36.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native-vision-camera@5.1.0(3f6800fbae98ba4a15f57013b37fbe2d))(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3):
+    dependencies:
+      react: 19.2.3
+      react-native: 0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1)
+      react-native-nitro-modules: 0.36.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+      react-native-vision-camera: 5.1.0(3f6800fbae98ba4a15f57013b37fbe2d)
 
   react-native-vision-camera-worklets@5.1.0(react-native-nitro-modules@0.36.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native-vision-camera@5.1.0(3f6800fbae98ba4a15f57013b37fbe2d))(react-native-worklets@0.10.2(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3):
     dependencies:

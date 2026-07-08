@@ -91,6 +91,11 @@ catalog:
   # not assumed from prior-version knowledge.
   react-native-worklets: ^0.10.2
   react-native-vision-camera-worklets: ^5.1.0
+  # ML Kit face detection + head-pose frame-processor plugin (task 2.2,
+  # ADR-006). Re-verified as still actively maintained and vision-camera
+  # v5-compatible immediately before use, per ADR-006's own caveat — not
+  # assumed from the version recorded when tech-stack.md was first written.
+  react-native-vision-camera-face-detector: ^2.0.5
 
 minimumReleaseAgeExclude:
   - '@turbo/darwin-64@2.10.4'
@@ -112,3 +117,4 @@ minimumReleaseAgeExclude:
   - expo-modules-core@57.0.3
   - expo-modules-jsi@57.0.1
   - expo@57.0.4
+  - react-native-vision-camera-face-detector@2.0.5
