@@ -1,0 +1,114 @@
+packages:
+  - "apps/*"
+  - "services/*"
+  - "packages/*"
+
+allowBuilds:
+  # Both are official first-party Prisma packages; their postinstall scripts
+  # fetch the native query-engine binaries Prisma requires to function at all.
+  '@prisma/engines': true
+  prisma: true
+  # better-sqlite3's install script builds/fetches its native binding —
+  # required for the SQLite driver adapter (ADR-003) to work at all.
+  better-sqlite3: true
+  # esbuild's postinstall fetches its platform-specific native binary —
+  # a transitive dependency of tsx (ADR-010), a widely-used, trusted tool.
+  esbuild: true
+  # Transitive dep of eas-cli's logging stack (bunyan) — its native binding is
+  # Solaris/macOS DTrace tracing, irrelevant on Linux and optional even where
+  # available (bunyan degrades to a no-op without it). Denied, not needed.
+  dtrace-provider: false
+  # Transitive dep of Jest 30's own jest-resolve (first-party, via
+  # @testing-library/react-native/jest-expo) — its postinstall fetches a
+  # platform-specific native binary for its Rust-based module resolver, same
+  # pattern as the already-allowed esbuild.
+  unrs-resolver: true
+
+# Single source of truth for shared tool/dependency versions — every package
+# references these via "catalog:" instead of repeating a version string, so a
+# version only ever needs updating in one place (see coding-standards.md's
+# no-hardcoded/unchannelized-values rule).
+catalog:
+  typescript: ^6.0.3
+  "@biomejs/biome": ^2.5.2
+  turbo: ^2.10.4
+  vitest: ^4.1.10
+  prisma: ^7.8.0
+  "@prisma/client": ^7.8.0
+  "@prisma/adapter-better-sqlite3": ^7.8.0
+  better-sqlite3: ^12.11.1
+  dotenv: ^17.4.2
+  tsx: ^4.23.0
+  # Pinned to the 24.x line to match the Node 24 runtime this project targets
+  # (ADR-003) — "latest" on npm is 26.x, matching a newer Node major, not ours.
+  "@types/node": ^24.13.2
+  fastify: ^5.10.0
+  mercurius: ^16.9.0
+  "@pothos/core": ^4.13.0
+  "@pothos/plugin-prisma": ^4.14.3
+  # Pinned to 16.x, NOT the npm "latest" (17.x) — mercurius@16.9's own
+  # peerDependencies require graphql ^16.0.0 (it imports a non-public internal
+  # function graphql 17 removed); @pothos/plugin-prisma also only declares
+  # ^16.10.0 support. 16.14.2 is the latest release within that compatible
+  # major — see decisions.md ADR-011.
+  graphql: ^16.14.2
+  "@fastify/cors": ^11.2.0
+  zod: ^4.4.3
+  jose: ^6.2.3
+  tamagui: ^2.4.2
+  "@tamagui/core": ^2.4.2
+  "@tamagui/config": ^2.4.2
+  "@tamagui/babel-plugin": ^2.4.2
+  "@tanstack/react-query": ^5.101.2
+  graphql-request: ^7.4.0
+  "@graphql-typed-document-node/core": ^3.2.0
+  "@graphql-codegen/cli": ^7.2.0
+  "@graphql-codegen/typescript-operations": ^6.1.0
+  "@graphql-codegen/typescript-react-query": ^7.0.5
+  # jest-expo@57.0.1 is the first version whose own peer dependency
+  # (`@react-native/jest-preset`) targets ^0.86.0, matching our pinned
+  # react-native@0.86.0 — 57.0.0 still targeted ^0.85.0 and conflicted
+  # (github.com/expo/expo/issues/47435), verified against npm before pinning.
+  jest-expo: ^57.0.1
+  # Pinned to 29.x, NOT npm's "latest" 30.x — jest-expo@57.0.1's own
+  # dependencies (@jest/globals, jest-snapshot, jest-environment-jsdom, all
+  # `^29.2.1`) are hard-pinned to Jest 29's internals; jest@30's jest-runtime
+  # calls a jest-mock API (`clearMocksOnScope`) that Jest 29's jest-mock
+  # (which jest-expo actually installs) doesn't have — confirmed by actually
+  # running the suite under jest@30 first and seeing it fail, not assumed.
+  # Same "verified minor pin below latest" precedent as graphql (ADR-011).
+  jest: ^29.7.0
+  "@types/jest": ^29.5.14
+  # v14 bundles the jest matchers that used to require the now-deprecated
+  # @testing-library/jest-native as a separate package — verified against
+  # testing-library's own docs before wiring this up, not assumed.
+  "@testing-library/react-native": ^14.0.1
+  # Frame processors (task 2.1, ADR-006 amendment): vision-camera v5 renamed
+  # "Frame Processors" to useFrameOutput and moved off the old (v1-v4)
+  # react-native-worklets-core onto Software Mansion's newly-extracted
+  # react-native-worklets — verified directly against the installed
+  # vision-camera-worklets package's peerDependencies and swmansion's docs,
+  # not assumed from prior-version knowledge.
+  react-native-worklets: ^0.10.2
+  react-native-vision-camera-worklets: ^5.1.0
+
+minimumReleaseAgeExclude:
+  - '@turbo/darwin-64@2.10.4'
+  - '@turbo/darwin-arm64@2.10.4'
+  - '@turbo/linux-64@2.10.4'
+  - '@turbo/linux-arm64@2.10.4'
+  - '@turbo/windows-64@2.10.4'
+  - '@turbo/windows-arm64@2.10.4'
+  - turbo@2.10.4
+  - '@expo/cli@57.0.6'
+  - '@expo/config-plugins@57.0.3'
+  - '@expo/config@57.0.3'
+  - '@expo/fingerprint@0.20.3'
+  - '@expo/inline-modules@0.1.2'
+  - '@expo/prebuild-config@57.0.5'
+  - '@expo/router-server@57.0.2'
+  - babel-preset-expo@57.0.2
+  - expo-modules-autolinking@57.0.5
+  - expo-modules-core@57.0.3
+  - expo-modules-jsi@57.0.1
+  - expo@57.0.4

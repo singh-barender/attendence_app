@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Generated (GraphQL codegen output — see ADR-012)
+generated/
+schema.graphql
+
+# Expo / React Native (native projects are regenerated via `expo prebuild`, not hand-edited)
+.expo/
+.expo-shared/
+android/
+ios/
+*.apk
+*.aab
+.kotlin/
+web-build/
+expo-env.d.ts
+.metro-health-check*
+.tamagui/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage/
+
+# Local SQLite databases (dev + test) — never committed (ADR-003)
+*.db
+*.db-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+docs/
+CLAUDE.md
+
+# Local Claude Code tool state (not project source)
+.claude/
