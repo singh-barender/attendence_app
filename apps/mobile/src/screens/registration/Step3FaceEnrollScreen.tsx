@@ -1,10 +1,11 @@
 /**
  * Step 3 of registration (requirements.md) — guided left/right/frontal
- * photo capture via react-native-vision-camera (ADR-006). Real embedding
- * computation and the enrollment quality gate are Phase 2 work (ADR-006,
- * ADR-018); this task captures real photos but submits a placeholder
+ * photo capture via react-native-vision-camera (ADR-006), gated by an
+ * enrollment quality check (task 2.7, ADR-018) before a capture is
+ * accepted. Real embedding computation is still Phase 2 work (task 2.8);
+ * this task captures real, quality-checked photos but submits a placeholder
  * embedding so `registerStep3` (which requires non-null vectors) can be
- * wired end-to-end now — Phase 2 replaces `PLACEHOLDER_EMBEDDING` with the
+ * wired end-to-end now — task 2.8 replaces `PLACEHOLDER_EMBEDDING` with the
  * real on-device computed vector, no schema change needed.
  *
  * Task 2.1 adds a real (not stubbed) `useFrameOutput` alongside the existing
@@ -22,10 +23,18 @@
  * needs (`leftEyeOpenProbability`/`rightEyeOpenProbability`) — a concrete,
  * already-decided near-term need (ADR-018), not speculative. `pitchAngle`/
  * `rollAngle`/`yawAngle` and `bounds` are always present on a detected
- * `Face`, no flag needed — task 2.7's enrollment quality gate (centering)
- * and 2.5/2.6's head-turn liveness will read those directly. The on-screen
- * debug readout exists to make "real ML Kit data is actually flowing on
- * this device" independently verifiable, not just assumed from a compile.
+ * `Face`, no flag needed. The on-screen debug readout exists to make "real
+ * ML Kit data is actually flowing on this device" independently verifiable,
+ * not just assumed from a compile.
+ *
+ * Task 2.7 adds the enrollment quality gate: `handleCapture` now captures an
+ * in-memory `Photo` (not straight to a file), measures its brightness/
+ * sharpness (`imageQualitySignals.native.ts`) and combines that with the
+ * latest live-frame face bounds (`latestFaceInfoRef`, updated every frame
+ * regardless of the debug-readout's own throttling) to judge the capture via
+ * `assessEnrollmentQuality` (`packages/liveness`'s sibling pure-logic
+ * package for this concern, `utils/enrollmentQuality.ts`) — only once
+ * accepted is the photo saved to a file and added to `photos`.
  */
 
 import { useRef, useState } from 'react';
@@ -46,7 +55,10 @@ import { FeedbackBanner } from '../../components/FeedbackBanner';
 import { StepProgress } from '../../components/StepProgress';
 import { useRegisterStep3Mutation } from '../../generated/graphql';
 import type { RootScreenProps } from '../../navigation/types';
+import { measureImageQuality } from '../../platform/imageQualitySignals.native';
 import { getErrorMessage } from '../../services/graphqlError';
+import type { FaceBounds } from '../../utils/enrollmentQuality';
+import { assessEnrollmentQuality } from '../../utils/enrollmentQuality';
 
 const PLACEHOLDER_EMBEDDING = [0];
 
@@ -58,13 +70,27 @@ const PLACEHOLDER_EMBEDDING = [0];
  */
 const FRAME_STATUS_UPDATE_INTERVAL_MS = 500;
 
-/** Minimal per-frame face summary for the debug readout — real fields task
- * 2.5 (liveness) and 2.7 (quality gate) will read directly off `Face` itself. */
+/** Minimal per-frame face summary for the debug readout — task 2.5's
+ * liveness work reads its own fields directly off `Face` itself. */
 interface FaceDebugSummary {
   count: number;
   leftEyeOpen: number | null;
   rightEyeOpen: number | null;
   yawAngle: number | null;
+  bounds: FaceBounds | null;
+}
+
+/**
+ * The most recent live frame's face presence/bounds/dimensions, updated on
+ * every frame (not just the throttled debug-readout state) so the quality
+ * gate always judges against fresh data at the exact moment of capture, not
+ * a value that's up to FRAME_STATUS_UPDATE_INTERVAL_MS stale.
+ */
+interface LatestFaceInfo {
+  hasFace: boolean;
+  bounds: FaceBounds | null;
+  frameWidth: number;
+  frameHeight: number;
 }
 
 const ANGLES = ['left', 'right', 'frontal'] as const;
@@ -95,20 +121,31 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
   }>({ count: 0, width: 0, height: 0, face: null });
   const totalFramesSeenRef = useRef(0);
   const lastFrameStatusUpdateRef = useRef(0);
+  const latestFaceInfoRef = useRef<LatestFaceInfo>({
+    hasFace: false,
+    bounds: null,
+    frameWidth: 0,
+    frameHeight: 0,
+  });
 
   const faceDetector = useFaceDetector({ performanceMode: 'fast', runClassifications: true });
 
   /**
    * Runs on the RN/JS thread (scheduled from the frame-output worklet below)
-   * for every frame — the total count is exact, but re-rendering React state
-   * is throttled since that's the actually-expensive part. Task 2.5+'s real
-   * per-frame liveness work will replace this with its own worklet-side
-   * pacing; this debug readout's per-frame `scheduleOnRN` cost is acceptable
-   * only because it's temporary and this screen's camera is active for
-   * seconds, not continuously.
+   * for every frame. `latestFaceInfoRef` is updated unconditionally so the
+   * quality gate (task 2.7) always reads fresh data at capture time; the
+   * debug-readout `setFrameStats` call below it is throttled since
+   * re-rendering React state on every frame would be wasteful.
    */
   function recordFrameSeen(width: number, height: number, face: FaceDebugSummary | null) {
     totalFramesSeenRef.current += 1;
+    latestFaceInfoRef.current = {
+      hasFace: (face?.count ?? 0) > 0,
+      bounds: face?.bounds ?? null,
+      frameWidth: width,
+      frameHeight: height,
+    };
+
     const now = Date.now();
     if (now - lastFrameStatusUpdateRef.current < FRAME_STATUS_UPDATE_INTERVAL_MS) {
       return;
@@ -135,8 +172,9 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             leftEyeOpen: firstFace.leftEyeOpenProbability ?? null,
             rightEyeOpen: firstFace.rightEyeOpenProbability ?? null,
             yawAngle: firstFace.yawAngle,
+            bounds: firstFace.bounds,
           }
-        : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null };
+        : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null, bounds: null };
       scheduleOnRN(recordFrameSeen, frame.width, frame.height, faceSummary);
       frame.dispose();
     },
@@ -154,11 +192,31 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
       return;
     }
     setCaptureError(null);
+
+    let photo: Awaited<ReturnType<typeof photoOutput.capturePhoto>> | undefined;
     try {
-      const file = await photoOutput.capturePhotoToFile({}, {});
-      setPhotos((prev) => ({ ...prev, [nextAngle]: file.filePath }));
+      photo = await photoOutput.capturePhoto({}, {});
+
+      const { averageBrightness, sharpnessScore } = measureImageQuality(photo.toImage());
+      const quality = assessEnrollmentQuality({
+        hasFace: latestFaceInfoRef.current.hasFace,
+        faceBounds: latestFaceInfoRef.current.bounds,
+        frameWidth: latestFaceInfoRef.current.frameWidth,
+        frameHeight: latestFaceInfoRef.current.frameHeight,
+        averageBrightness,
+        sharpnessScore,
+      });
+      if (!quality.accepted) {
+        setCaptureError(quality.message);
+        return;
+      }
+
+      const filePath = await photo.saveToTemporaryFileAsync();
+      setPhotos((prev) => ({ ...prev, [nextAngle]: filePath }));
     } catch (err) {
       setCaptureError(getErrorMessage(err, 'Failed to capture photo.'));
+    } finally {
+      photo?.dispose();
     }
   }
 
