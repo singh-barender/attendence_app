@@ -137,6 +137,9 @@ importers:
       '@attendance-app/face-matching':
         specifier: workspace:*
         version: link:../../packages/face-matching
+      '@attendance-app/liveness':
+        specifier: workspace:*
+        version: link:../../packages/liveness
       '@attendance-app/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

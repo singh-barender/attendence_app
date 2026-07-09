@@ -4,6 +4,7 @@
   "main": "index.ts",
   "dependencies": {
     "@attendance-app/face-matching": "workspace:*",
+    "@attendance-app/liveness": "workspace:*",
     "@attendance-app/shared-types": "workspace:*",
     "@graphql-typed-document-node/core": "catalog:",
     "@react-navigation/native": "^7.3.7",

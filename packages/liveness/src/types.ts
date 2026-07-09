@@ -37,3 +37,14 @@ export interface HeadTurnDetectionResult {
   /** Direction of the largest deviation from baseline, or null if not detected. */
   readonly direction: HeadTurnDirection | null;
 }
+
+/**
+ * Which challenge a screen is presenting. Shared by both platforms' signal
+ * extractors (`livenessSignals.native.ts`/`livenessSignals.web.ts`) and the
+ * platform-agnostic `LivenessChallengeOverlay` UI component, so the overlay
+ * never needs to import a platform-specific module just for this type.
+ */
+export type LivenessChallengeType = 'blink' | 'head-turn';
+
+/** Either detection result, discriminated by which challenge type produced it. */
+export type LivenessChallengeResult = BlinkDetectionResult | HeadTurnDetectionResult;

@@ -6,5 +6,7 @@ export type {
   BlinkDetectionResult,
   HeadTurnDetectionResult,
   HeadTurnDirection,
+  LivenessChallengeResult,
+  LivenessChallengeType,
   LivenessSample,
 } from './types.js';
