@@ -305,7 +305,17 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
             bounds: firstFace.bounds,
           }
         : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null, bounds: null };
-      scheduleOnRN(recordFrameSeen, frame.width, frame.height, faceSummary);
+      // ML Kit's InputImage is built with the frame's rotationDegrees, so
+      // `firstFace.bounds` is already in the rotated/upright space, while
+      // `frame.width`/`frame.height` deliberately stay in the raw,
+      // pre-rotation sensor space (see Step3FaceEnrollScreen.tsx's onFrame
+      // for the full explanation — same bug, same fix, needed here too since
+      // `mapFaceBoundsToCropRect` below depends on frameWidth/frameHeight
+      // matching the coordinate space `bounds` is actually in).
+      const isRotated90 = frame.orientation === 'left' || frame.orientation === 'right';
+      const effectiveWidth = isRotated90 ? frame.height : frame.width;
+      const effectiveHeight = isRotated90 ? frame.width : frame.height;
+      scheduleOnRN(recordFrameSeen, effectiveWidth, effectiveHeight, faceSummary);
       frame.dispose();
     },
   });

@@ -69,6 +69,11 @@ import { getErrorMessage } from '../../services/graphqlError';
 import type { FaceBounds } from '../../utils/enrollmentQuality';
 import { assessEnrollmentQuality } from '../../utils/enrollmentQuality';
 import { mapFaceBoundsToCropRect } from '../../utils/faceCrop';
+import {
+  assessLiveAlignment,
+  MAX_FRONTAL_YAW_DEGREES,
+  MIN_PROFILE_YAW_DEGREES,
+} from '../../utils/liveFaceAlignment';
 
 /** A completed, quality-checked capture for one angle: the saved photo (for
  * the thumbnail preview) and its computed embedding (submitted at Finish). */
@@ -111,13 +116,35 @@ interface LatestFaceInfo {
 const ANGLES = ['left', 'right', 'frontal'] as const;
 type Angle = (typeof ANGLES)[number];
 
-const ANGLE_INFO: Record<Angle, { label: string; instruction: string }> = {
-  left: { label: 'Left profile', instruction: 'Turn your head slightly to show your left profile' },
+/**
+ * Per-angle live-guide yaw range (task: real-time alignment overlay) — the
+ * bound the live yaw must fall within for `assessLiveAlignment` to consider
+ * the current angle "aligned". `left`/`right` deliberately leave one side
+ * open-ended (`Infinity`): any turn past the minimum still counts as that
+ * profile, there's no such thing as "too far turned" for this guide.
+ */
+const ANGLE_INFO: Record<
+  Angle,
+  { label: string; instruction: string; minYaw: number; maxYaw: number }
+> = {
+  left: {
+    label: 'Left profile',
+    instruction: 'Turn your head slightly to show your left profile',
+    minYaw: -Infinity,
+    maxYaw: -MIN_PROFILE_YAW_DEGREES,
+  },
   right: {
     label: 'Right profile',
     instruction: 'Turn your head slightly to show your right profile',
+    minYaw: MIN_PROFILE_YAW_DEGREES,
+    maxYaw: Infinity,
   },
-  frontal: { label: 'Frontal', instruction: 'Face the camera directly' },
+  frontal: {
+    label: 'Frontal',
+    instruction: 'Face the camera directly',
+    minYaw: -MAX_FRONTAL_YAW_DEGREES,
+    maxYaw: MAX_FRONTAL_YAW_DEGREES,
+  },
 };
 
 export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'RegisterStep3'>) {
@@ -196,7 +223,19 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             bounds: firstFace.bounds,
           }
         : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null, bounds: null };
-      scheduleOnRN(recordFrameSeen, frame.width, frame.height, faceSummary);
+      // ML Kit's InputImage is built with the frame's rotationDegrees (see
+      // react-native-vision-camera-face-detector's ML+HybridFrameSpec.kt), so
+      // `firstFace.bounds` is already reported in the upright/rotated space —
+      // but `frame.width`/`frame.height` deliberately stay in the raw,
+      // pre-rotation sensor space (per Frame.orientation's own docs, physically
+      // rotating buffers is expensive). On a 90°-rotated frame that swap must
+      // be mirrored here, or every downstream consumer of frameWidth/
+      // frameHeight (the quality gate's centering check, the embedding crop)
+      // silently compares bounds against the wrong axis.
+      const isRotated90 = frame.orientation === 'left' || frame.orientation === 'right';
+      const effectiveWidth = isRotated90 ? frame.height : frame.width;
+      const effectiveHeight = isRotated90 ? frame.width : frame.height;
+      scheduleOnRN(recordFrameSeen, effectiveWidth, effectiveHeight, faceSummary);
       frame.dispose();
     },
   });
@@ -207,6 +246,21 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
 
   const nextAngle = ANGLES.find((angle) => !photos[angle]);
   const capturedCount = ANGLES.filter((angle) => photos[angle]).length;
+
+  // Drives the live guide overlay/capture gating below — reuses the same
+  // throttled `frameStats` the debug readout already computes (task 2.1),
+  // so this adds no extra per-frame state or re-render pressure.
+  const isAligned = nextAngle
+    ? assessLiveAlignment({
+        hasFace: (frameStats.face?.count ?? 0) > 0,
+        faceBounds: frameStats.face?.bounds ?? null,
+        frameWidth: frameStats.width,
+        frameHeight: frameStats.height,
+        yawAngle: frameStats.face?.yawAngle ?? null,
+        minYawDegrees: ANGLE_INFO[nextAngle].minYaw,
+        maxYawDegrees: ANGLE_INFO[nextAngle].maxYaw,
+      })
+    : false;
 
   async function handleCapture() {
     if (!nextAngle) {
@@ -317,13 +371,37 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             <Text color="$color" fontWeight="600">
               {ANGLE_INFO[nextAngle].instruction}
             </Text>
-            <YStack style={{ height: 320, overflow: 'hidden', borderRadius: 8 }}>
+            <YStack
+              style={{ height: 320, overflow: 'hidden', borderRadius: 8, position: 'relative' }}
+            >
               <Camera
                 style={{ flex: 1 }}
                 device={device}
                 isActive
                 outputs={[photoOutput, frameOutput]}
               />
+              {/* Real-time framing guide — turns green once assessLiveAlignment
+                  (same size/centering thresholds as the post-capture gate,
+                  plus a yaw check for the requested angle) is satisfied, so
+                  the user gets steering feedback before tapping Capture
+                  instead of only a rejection message after. */}
+              <YStack
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <YStack
+                  borderColor={isAligned ? '$green9' : '$red9'}
+                  style={{ width: 170, height: 230, borderRadius: 999, borderWidth: 4 }}
+                />
+              </YStack>
             </YStack>
             {frameStats.count > 0 ? (
               <Text color="$color10" fontSize="$1">
@@ -339,8 +417,10 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
                 ) : null}
               </Text>
             ) : null}
-            <Button onPress={handleCapture} mt="$2">
-              Capture {ANGLE_INFO[nextAngle].label}
+            <Button onPress={handleCapture} disabled={!isAligned} mt="$2">
+              {isAligned
+                ? `Capture ${ANGLE_INFO[nextAngle].label}`
+                : 'Align your face in the frame'}
             </Button>
           </>
         ) : (
