@@ -349,6 +349,50 @@ describe('backend integration', () => {
     expect(profile.data?.me.enrollmentStatus.faceEnrolled).toBe(false);
   });
 
+  it('serves `myVerificationAttempts` most-recent-first, rejecting unauthenticated access', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Verification Activity', email: 'verification.activity@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    await graphql(
+      'mutation($userId:ID!,$fp:Boolean!){ registerStep2(userId:$userId,fingerprintConfirmed:$fp){ registrationStep } }',
+      { userId, fp: true },
+    );
+
+    // A SUCCESS attempt (fingerprint enrolled) followed by a FAILURE attempt
+    // (face never enrolled) — in that order, so most-recent-first ordering
+    // is actually exercised, not just "returns everything."
+    const checkIn = await graphql<{ punchInFingerprint: { token: string } }>(
+      'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ token } }',
+      { userId },
+    );
+    const token = checkIn.data?.punchInFingerprint.token;
+
+    await graphql(
+      'mutation($userId:ID!,$emb:[Float!]!){ punchInFace(userId:$userId,embedding:$emb){ token } }',
+      { userId, emb: [1, 0, 0] },
+    );
+
+    const noAuth = await graphql('{ myVerificationAttempts { method } }');
+    expect(noAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
+
+    const attempts = await graphql<{
+      myVerificationAttempts: { method: string; outcome: string; matchScore: number | null }[];
+    }>('{ myVerificationAttempts { method outcome matchScore } }', undefined, token);
+
+    expect(attempts.data?.myVerificationAttempts).toHaveLength(2);
+    expect(attempts.data?.myVerificationAttempts[0]).toMatchObject({
+      method: 'FACE',
+      outcome: 'FAILURE',
+    });
+    expect(attempts.data?.myVerificationAttempts[1]).toMatchObject({
+      method: 'FINGERPRINT',
+      outcome: 'SUCCESS',
+    });
+  });
+
   it('logs a FAILURE verification attempt when fingerprint is not enrolled', async () => {
     const step1 = await graphql<{ registerStep1: { id: string } }>(
       'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',

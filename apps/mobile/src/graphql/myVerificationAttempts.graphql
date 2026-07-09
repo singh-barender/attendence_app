@@ -1,0 +1,9 @@
+query MyVerificationAttempts {
+  myVerificationAttempts {
+    id
+    method
+    outcome
+    matchScore
+    timestamp
+  }
+}

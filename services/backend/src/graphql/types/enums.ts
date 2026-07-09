@@ -7,7 +7,11 @@
  */
 
 import { ATTENDANCE_STATUS } from '../../services/attendanceReportingService';
-import { PUNCH_TYPE, VERIFICATION_METHOD } from '../../services/attendanceService';
+import {
+  PUNCH_TYPE,
+  VERIFICATION_METHOD,
+  VERIFICATION_OUTCOME,
+} from '../../services/attendanceService';
 import { builder } from '../builder';
 
 export const PunchTypeEnum = builder.enumType('PunchType', {
@@ -16,6 +20,10 @@ export const PunchTypeEnum = builder.enumType('PunchType', {
 
 export const VerificationMethodEnum = builder.enumType('VerificationMethod', {
   values: Object.values(VERIFICATION_METHOD),
+});
+
+export const VerificationOutcomeEnum = builder.enumType('VerificationOutcome', {
+  values: Object.values(VERIFICATION_OUTCOME),
 });
 
 export const AttendanceStatusEnum = builder.enumType('AttendanceStatus', {

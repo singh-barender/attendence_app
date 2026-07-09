@@ -1,26 +1,31 @@
 /**
- * Account info + enrollment status display (task 4.1) plus re-enrollment
- * actions (task 4.2, ADR-018) — reads the `me` query, the authenticated
- * counterpart of `identify`'s pre-login lookup. Verification-attempt audit,
- * data export/delete, and the theme toggle are later Phase 4 tasks
- * (ADR-019, ADR-020) and aren't part of this screen yet.
+ * Account info + enrollment status display (task 4.1), re-enrollment
+ * actions (task 4.2, ADR-018), and a verification-activity audit trail
+ * (task 4.4, ADR-019) — reads the `me` and `myVerificationAttempts`
+ * queries. Data export/delete and the theme toggle are later Phase 4 tasks
+ * (ADR-020) and aren't part of this screen yet.
  *
- * `useFocusEffect` refetches `me` whenever this screen regains focus —
- * React Navigation keeps this screen instance mounted underneath
+ * `useFocusEffect` refetches both queries whenever this screen regains
+ * focus — React Navigation keeps this screen instance mounted underneath
  * ReEnrollFace/ReEnrollFingerprint rather than remounting it on the way
- * back, so without an explicit refetch the enrollment status shown here
- * would still reflect the pre-re-enrollment state.
+ * back, so without an explicit refetch the enrollment status and activity
+ * list would still reflect pre-re-enrollment/pre-punch state.
  */
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
 import { Button, H3, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { useMeQuery } from '../generated/graphql';
+import {
+  useMeQuery,
+  useMyVerificationAttemptsQuery,
+  type VerificationMethod,
+  type VerificationOutcome,
+} from '../generated/graphql';
 import type { RootScreenProps } from '../navigation/types';
 import { FINGERPRINT_SUPPORTED } from '../platform/biometric';
 import { getErrorMessage } from '../services/graphqlError';
-import { formatMemberSince } from '../utils/formatDateTime';
+import { formatAttemptTimestamp, formatMemberSince } from '../utils/formatDateTime';
 
 function EnrollmentRow({ label, enrolled }: { label: string; enrolled: boolean }) {
   return (
@@ -42,13 +47,55 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+const METHOD_LABELS: Record<VerificationMethod, string> = {
+  FACE: 'Face',
+  FINGERPRINT: 'Fingerprint',
+};
+
+function VerificationAttemptRow({
+  method,
+  outcome,
+  matchScore,
+  timestamp,
+}: {
+  method: VerificationMethod;
+  outcome: VerificationOutcome;
+  matchScore: number | null;
+  timestamp: string;
+}) {
+  const isSuccess = outcome === 'SUCCESS';
+  return (
+    <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+      <YStack>
+        <Text color="$color">{METHOD_LABELS[method]}</Text>
+        <Text color="$color10" fontSize="$2">
+          {formatAttemptTimestamp(timestamp)}
+          {matchScore != null ? ` — score ${matchScore.toFixed(2)}` : ''}
+        </Text>
+      </YStack>
+      <Text color={isSuccess ? '$green10' : '$red10'} fontWeight="600">
+        {isSuccess ? 'Success' : 'Failure'}
+      </Text>
+    </XStack>
+  );
+}
+
 export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const { data, isLoading, isError, error, refetch, isRefetching } = useMeQuery();
+  const {
+    data: attemptsData,
+    isLoading: isAttemptsLoading,
+    isError: isAttemptsError,
+    error: attemptsError,
+    refetch: refetchAttempts,
+    isRefetching: isAttemptsRefetching,
+  } = useMyVerificationAttemptsQuery();
 
   useFocusEffect(
     useCallback(() => {
       refetch();
-    }, [refetch]),
+      refetchAttempts();
+    }, [refetch, refetchAttempts]),
   );
 
   const errorMessage = isError ? getErrorMessage(error) : null;
@@ -135,6 +182,46 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 </Button>
               ) : null}
             </XStack>
+          </YStack>
+
+          <YStack
+            gap="$2"
+            borderWidth={1}
+            borderColor="$borderColor"
+            p="$3"
+            style={{ borderRadius: 8 }}
+          >
+            <H3>Verification activity</H3>
+            {isAttemptsLoading ? (
+              <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Spinner />
+                <Text color="$color10">Loading activity...</Text>
+              </YStack>
+            ) : null}
+            {isAttemptsError ? (
+              <YStack gap="$2">
+                <FeedbackBanner variant="error" message={getErrorMessage(attemptsError)} />
+                <Button onPress={() => refetchAttempts()} disabled={isAttemptsRefetching}>
+                  {isAttemptsRefetching ? 'Retrying...' : 'Retry'}
+                </Button>
+              </YStack>
+            ) : null}
+            {!isAttemptsLoading &&
+            !isAttemptsError &&
+            (attemptsData?.myVerificationAttempts?.length ?? 0) === 0 ? (
+              <FeedbackBanner variant="info" message="No verification attempts yet." />
+            ) : null}
+            {attemptsData?.myVerificationAttempts?.map((attempt) =>
+              attempt.id && attempt.method && attempt.outcome && attempt.timestamp ? (
+                <VerificationAttemptRow
+                  key={attempt.id}
+                  method={attempt.method}
+                  outcome={attempt.outcome}
+                  matchScore={attempt.matchScore ?? null}
+                  timestamp={attempt.timestamp}
+                />
+              ) : null,
+            )}
           </YStack>
         </YStack>
       ) : null}
