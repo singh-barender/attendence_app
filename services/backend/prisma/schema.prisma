@@ -57,6 +57,12 @@ model BiometricEnrollment {
   embedding String? // JSON-stringified Float32 array; null for FINGERPRINT_FLAG
   imageUri  String? // optional reference image path, for audit/debugging
   createdAt DateTime @default(now())
+  // Set when re-enrollment (ADR-018) supersedes this row with a fresh one;
+  // null means "currently active." Rows are never deleted, only superseded,
+  // so past enrollments stay available for audit — but matching/status
+  // logic (enrollmentService.getFaceEmbeddings/getEnrollmentStatus) must
+  // only ever consider the active (supersededAt: null) set.
+  supersededAt DateTime?
 
   @@index([userId])
 }

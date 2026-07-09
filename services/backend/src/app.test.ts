@@ -187,6 +187,108 @@ describe('backend integration', () => {
     expect(records).toHaveLength(0);
   });
 
+  it('re-enrolling face supersedes the old embedding so it no longer matches at punch-in', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Re-enroll Face', email: 're-enroll.face@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    await graphql(
+      'mutation($userId:ID!,$fp:Boolean!){ registerStep2(userId:$userId,fingerprintConfirmed:$fp){ registrationStep } }',
+      { userId, fp: true },
+    );
+
+    const oldEmbedding = [1, 0, 0];
+    await graphql(
+      'mutation($userId:ID!,$e:FaceEmbeddingsInput!){ registerStep3(userId:$userId,embeddings:$e){ registrationStep } }',
+      { userId, e: { left: oldEmbedding, right: oldEmbedding, frontal: oldEmbedding } },
+    );
+
+    // Token comes from a fingerprint punch-in, kept independent of the face
+    // flow under test so its own check-in/check-out inference doesn't
+    // interact with the punchInFace assertions below.
+    const checkIn = await graphql<{ punchInFingerprint: { token: string } }>(
+      'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ token } }',
+      { userId },
+    );
+    const token = checkIn.data?.punchInFingerprint.token;
+
+    const noAuth = await graphql(
+      'mutation($e:FaceEmbeddingsInput!){ reEnrollFace(embeddings:$e){ faceEnrolled } }',
+      { e: { left: oldEmbedding, right: oldEmbedding, frontal: oldEmbedding } },
+    );
+    expect(noAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
+
+    const newEmbedding = [0, 1, 0];
+    const reEnroll = await graphql<{ reEnrollFace: { faceEnrolled: boolean } }>(
+      'mutation($e:FaceEmbeddingsInput!){ reEnrollFace(embeddings:$e){ faceEnrolled } }',
+      { e: { left: newEmbedding, right: newEmbedding, frontal: newEmbedding } },
+      token,
+    );
+    expect(reEnroll.data?.reEnrollFace.faceEnrolled).toBe(true);
+
+    // The old (now-superseded) embedding must never match again.
+    const oldPunch = await graphql(
+      'mutation($userId:ID!,$emb:[Float!]!){ punchInFace(userId:$userId,embedding:$emb){ token } }',
+      { userId, emb: oldEmbedding },
+    );
+    expect(oldPunch.errors?.[0]?.message).toMatch(/did not match/i);
+
+    // The new embedding matches.
+    const newPunch = await graphql<{ punchInFace: { matched: boolean } }>(
+      'mutation($userId:ID!,$emb:[Float!]!){ punchInFace(userId:$userId,embedding:$emb){ matched } }',
+      { userId, emb: newEmbedding },
+    );
+    expect(newPunch.data?.punchInFace.matched).toBe(true);
+
+    const faceRows = await prisma.biometricEnrollment.findMany({
+      where: {
+        userId: userId as string,
+        type: { in: ['FACE_LEFT', 'FACE_RIGHT', 'FACE_FRONTAL'] },
+      },
+    });
+    expect(faceRows).toHaveLength(6);
+    expect(faceRows.filter((row) => row.supersededAt === null)).toHaveLength(3);
+    expect(faceRows.filter((row) => row.supersededAt !== null)).toHaveLength(3);
+  });
+
+  it('re-enrolling fingerprint supersedes the old row while staying enrolled', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Re-enroll Fingerprint', email: 're-enroll.fingerprint@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    await graphql(
+      'mutation($userId:ID!,$fp:Boolean!){ registerStep2(userId:$userId,fingerprintConfirmed:$fp){ registrationStep } }',
+      { userId, fp: true },
+    );
+
+    const checkIn = await graphql<{ punchInFingerprint: { token: string } }>(
+      'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ token } }',
+      { userId },
+    );
+    const token = checkIn.data?.punchInFingerprint.token;
+
+    const noAuth = await graphql('mutation{ reEnrollFingerprint{ fingerprintEnrolled } }');
+    expect(noAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
+
+    const reEnroll = await graphql<{ reEnrollFingerprint: { fingerprintEnrolled: boolean } }>(
+      'mutation{ reEnrollFingerprint{ fingerprintEnrolled } }',
+      undefined,
+      token,
+    );
+    expect(reEnroll.data?.reEnrollFingerprint.fingerprintEnrolled).toBe(true);
+
+    const rows = await prisma.biometricEnrollment.findMany({
+      where: { userId: userId as string, type: 'FINGERPRINT_FLAG' },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((row) => row.supersededAt === null)).toHaveLength(1);
+    expect(rows.filter((row) => row.supersededAt !== null)).toHaveLength(1);
+  });
+
   it('logs a FAILURE verification attempt when face is not enrolled', async () => {
     const step1 = await graphql<{ registerStep1: { id: string } }>(
       'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',

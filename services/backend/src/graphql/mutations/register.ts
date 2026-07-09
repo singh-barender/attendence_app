@@ -8,7 +8,7 @@ import * as enrollmentService from '../../services/enrollmentService';
 import * as userService from '../../services/userService';
 import { builder } from '../builder';
 
-const FaceEmbeddingsInput = builder.inputType('FaceEmbeddingsInput', {
+export const FaceEmbeddingsInput = builder.inputType('FaceEmbeddingsInput', {
   fields: (t) => ({
     left: t.floatList({ required: true }),
     right: t.floatList({ required: true }),

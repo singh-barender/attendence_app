@@ -14,5 +14,6 @@ import './types/AttendanceRecord';
 import './types/AttendanceDaySummary';
 import './mutations/register';
 import './mutations/punchIn';
+import './mutations/reEnroll';
 
 export const schema = builder.toSchema();
