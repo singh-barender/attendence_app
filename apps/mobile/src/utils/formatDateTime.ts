@@ -44,3 +44,12 @@ export function formatMonthYear(year: number, monthIndex: number): string {
 export function toDateOnlyString(year: number, monthIndex: number, day: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
+
+/** Combined date+time, unlike `formatPunchTime` (time only) — verification
+ * attempts (task 4.4) can span many different days, so the date needs to
+ * stay visible, not just the time-of-day. */
+export function formatAttemptTimestamp(iso: string): string {
+  const date = new Date(iso);
+  const datePart = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${datePart}, ${formatPunchTime(iso)}`;
+}

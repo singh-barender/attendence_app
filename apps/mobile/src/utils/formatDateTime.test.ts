@@ -1,4 +1,5 @@
 import {
+  formatAttemptTimestamp,
   formatHoursWorked,
   formatMemberSince,
   formatMonthYear,
@@ -45,5 +46,15 @@ describe('toDateOnlyString', () => {
 
   it('leaves double-digit months and days unpadded', () => {
     expect(toDateOnlyString(2026, 11, 25)).toBe('2026-12-25');
+  });
+});
+
+describe('formatAttemptTimestamp', () => {
+  it('combines a short date with the time-of-day, comma-separated', () => {
+    // Time-of-day is timezone-dependent in the test environment, so this
+    // checks structure (date part + separator + a time-like suffix) rather
+    // than asserting one exact wall-clock string.
+    const result = formatAttemptTimestamp('2026-07-09T12:00:00.000Z');
+    expect(result).toMatch(/^Jul 9, \d{1,2}:\d{2}\s?[AP]M$/);
   });
 });
