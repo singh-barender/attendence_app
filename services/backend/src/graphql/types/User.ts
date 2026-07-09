@@ -9,7 +9,7 @@ import { builder } from '../builder';
 import { EnrollmentStatusRef } from './EnrollmentStatus';
 import { DateTimeScalar } from './scalars';
 
-builder.prismaObject('User', {
+export const UserRef = builder.prismaObject('User', {
   fields: (t) => ({
     id: t.exposeID('id'),
     fullName: t.exposeString('fullName'),

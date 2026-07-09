@@ -393,6 +393,73 @@ describe('backend integration', () => {
     });
   });
 
+  it('serves `exportMyData` with profile, enrollment metadata (no embeddings), attendance, and attempts', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Export User', email: 'export.user@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    await graphql(
+      'mutation($userId:ID!,$fp:Boolean!){ registerStep2(userId:$userId,fingerprintConfirmed:$fp){ registrationStep } }',
+      { userId, fp: true },
+    );
+    const embedding = [1, 0, 0];
+    await graphql(
+      'mutation($userId:ID!,$e:FaceEmbeddingsInput!){ registerStep3(userId:$userId,embeddings:$e){ registrationStep } }',
+      { userId, e: { left: embedding, right: embedding, frontal: embedding } },
+    );
+
+    const checkIn = await graphql<{ punchInFingerprint: { token: string } }>(
+      'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ token } }',
+      { userId },
+    );
+    const token = checkIn.data?.punchInFingerprint.token;
+
+    const noAuth = await graphql('{ exportMyData { profile { email } } }');
+    expect(noAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
+
+    const query = `{
+      exportMyData {
+        profile { fullName email }
+        enrollments { type createdAt supersededAt }
+        attendanceRecords { type method }
+        verificationAttempts { method outcome }
+      }
+    }`;
+    const result = await graphql<{
+      exportMyData: {
+        profile: { fullName: string; email: string };
+        enrollments: { type: string; createdAt: string; supersededAt: string | null }[];
+        attendanceRecords: { type: string; method: string }[];
+        verificationAttempts: { method: string; outcome: string }[];
+      };
+    }>(query, undefined, token);
+
+    expect(result.errors).toBeUndefined();
+    expect(result.data?.exportMyData.profile).toMatchObject({
+      fullName: 'Export User',
+      email: 'export.user@example.com',
+    });
+    // 3 face rows (left/right/frontal) + 1 fingerprint row, none superseded.
+    expect(result.data?.exportMyData.enrollments).toHaveLength(4);
+    for (const enrollment of result.data?.exportMyData.enrollments ?? []) {
+      expect(enrollment.supersededAt).toBeNull();
+      // The metadata-only shape has no `embedding` field to accidentally
+      // expose — asserting the raw response JSON never contains the string
+      // "embedding" anywhere is a stronger guarantee than just checking
+      // the TypeScript type, since a resolver bug could still leak it at
+      // runtime even if the declared type looks clean.
+      expect(JSON.stringify(enrollment)).not.toContain('embedding');
+    }
+    expect(result.data?.exportMyData.attendanceRecords).toHaveLength(1);
+    expect(result.data?.exportMyData.verificationAttempts).toHaveLength(1);
+    expect(result.data?.exportMyData.verificationAttempts[0]).toMatchObject({
+      method: 'FINGERPRINT',
+      outcome: 'SUCCESS',
+    });
+  });
+
   it('logs a FAILURE verification attempt when fingerprint is not enrolled', async () => {
     const step1 = await graphql<{ registerStep1: { id: string } }>(
       'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',

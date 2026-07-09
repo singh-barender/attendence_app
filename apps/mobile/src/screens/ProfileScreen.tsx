@@ -1,22 +1,28 @@
 /**
  * Account info + enrollment status display (task 4.1), re-enrollment
- * actions (task 4.2, ADR-018), and a verification-activity audit trail
- * (task 4.4, ADR-019) — reads the `me` and `myVerificationAttempts`
- * queries. Data export/delete and the theme toggle are later Phase 4 tasks
- * (ADR-020) and aren't part of this screen yet.
+ * actions (task 4.2, ADR-018), a verification-activity audit trail (task
+ * 4.4, ADR-019), and a "Download my data" export action (task 4.5,
+ * ADR-020) — reads the `me`, `myVerificationAttempts`, and (on demand)
+ * `exportMyData` queries. Account deletion and the theme toggle are later
+ * Phase 4 tasks and aren't part of this screen yet.
  *
- * `useFocusEffect` refetches both queries whenever this screen regains
- * focus — React Navigation keeps this screen instance mounted underneath
- * ReEnrollFace/ReEnrollFingerprint rather than remounting it on the way
- * back, so without an explicit refetch the enrollment status and activity
- * list would still reflect pre-re-enrollment/pre-punch state.
+ * `useFocusEffect` refetches `me`/`myVerificationAttempts` whenever this
+ * screen regains focus — React Navigation keeps this screen instance
+ * mounted underneath ReEnrollFace/ReEnrollFingerprint rather than
+ * remounting it on the way back, so without an explicit refetch the
+ * enrollment status and activity list would still reflect
+ * pre-re-enrollment/pre-punch state. `exportMyData` is deliberately not
+ * auto-fetched (`enabled: false`) — it's an on-demand user action
+ * triggered by the Download button, not something every profile visit
+ * needs to fetch.
  */
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Button, H3, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import {
+  useExportMyDataQuery,
   useMeQuery,
   useMyVerificationAttemptsQuery,
   type VerificationMethod,
@@ -24,6 +30,7 @@ import {
 } from '../generated/graphql';
 import type { RootScreenProps } from '../navigation/types';
 import { FINGERPRINT_SUPPORTED } from '../platform/biometric';
+import { saveMyDataExport } from '../platform/dataExport';
 import { getErrorMessage } from '../services/graphqlError';
 import { formatAttemptTimestamp, formatMemberSince } from '../utils/formatDateTime';
 
@@ -90,6 +97,9 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
     refetch: refetchAttempts,
     isRefetching: isAttemptsRefetching,
   } = useMyVerificationAttemptsQuery();
+  const { refetch: fetchExportData } = useExportMyDataQuery(undefined, { enabled: false });
+  const [isDownloadingData, setIsDownloadingData] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -97,6 +107,25 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
       refetchAttempts();
     }, [refetch, refetchAttempts]),
   );
+
+  async function handleDownloadData() {
+    setDownloadError(null);
+    setIsDownloadingData(true);
+    try {
+      const result = await fetchExportData();
+      if (result.error) {
+        throw result.error;
+      }
+      if (!result.data?.exportMyData) {
+        throw new Error('No data returned.');
+      }
+      await saveMyDataExport(result.data.exportMyData);
+    } catch (err) {
+      setDownloadError(getErrorMessage(err, 'Failed to export your data.'));
+    } finally {
+      setIsDownloadingData(false);
+    }
+  }
 
   const errorMessage = isError ? getErrorMessage(error) : null;
   const isUnauthorized = errorMessage?.includes('Unauthorized') ?? false;
@@ -222,6 +251,24 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 />
               ) : null,
             )}
+          </YStack>
+
+          <YStack
+            gap="$2"
+            borderWidth={1}
+            borderColor="$borderColor"
+            p="$3"
+            style={{ borderRadius: 8 }}
+          >
+            <H3>Data controls</H3>
+            {downloadError ? <FeedbackBanner variant="error" message={downloadError} /> : null}
+            <Button
+              onPress={handleDownloadData}
+              disabled={isDownloadingData}
+              {...(isDownloadingData ? { icon: <Spinner /> } : {})}
+            >
+              {isDownloadingData ? 'Preparing download...' : 'Download my data'}
+            </Button>
           </YStack>
         </YStack>
       ) : null}
