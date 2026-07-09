@@ -403,6 +403,9 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
                     requestCameraPermission={requestCameraPermission}
                     hasDevice={hasDevice}
                     onFrame={handleFrame}
+                    onCameraError={(err) =>
+                      handleFaceFailure(getErrorMessage(err, 'Camera error.'))
+                    }
                     liveness={liveness}
                     isFaceTimedOut={isFaceTimedOut}
                     isProcessingFace={isProcessingFace || isPunchingInFace}
@@ -459,6 +462,7 @@ interface FaceVerificationCameraProps {
   requestCameraPermission: () => Promise<boolean>;
   hasDevice: boolean;
   onFrame: (info: LiveFaceInfo) => void;
+  onCameraError: (error: Error) => void;
   liveness: ReturnType<typeof useLivenessChallenge>;
   isFaceTimedOut: boolean;
   isProcessingFace: boolean;
@@ -486,6 +490,7 @@ function FaceVerificationCamera({
   requestCameraPermission,
   hasDevice,
   onFrame,
+  onCameraError,
   liveness,
   isFaceTimedOut,
   isProcessingFace,
@@ -515,7 +520,7 @@ function FaceVerificationCamera({
   return (
     <YStack gap="$2">
       <YStack style={{ height: 320, overflow: 'hidden', borderRadius: 8 }}>
-        <FaceCameraView ref={cameraRef} onFrame={onFrame} />
+        <FaceCameraView ref={cameraRef} onFrame={onFrame} onError={onCameraError} />
       </YStack>
 
       <LivenessChallengeOverlay type="blink" result={liveness.result} timedOut={isFaceTimedOut} />

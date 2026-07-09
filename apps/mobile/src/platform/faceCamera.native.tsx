@@ -4,8 +4,22 @@
  * react-native-vision-camera + ML Kit frame-processor code (tasks 2.1/2.2)
  * so both screens (and their future web counterparts) share one
  * implementation instead of two independent copies of the same camera
- * wiring. Behavior is unchanged from the pre-extraction inline versions —
- * this is a pure extraction, not a redesign.
+ * wiring. A near-pure extraction, not a redesign — with one deliberate,
+ * minor behavior difference: `capture()` always writes its temp preview
+ * file (previously only capture attempts the quality gate *accepted* were
+ * saved to disk). A capture the caller goes on to reject never has its
+ * `previewUri` read, so the extra file is simply unused rather than
+ * harmful — accepted as a reasonable tradeoff for `capture()` returning
+ * one complete, ready-to-use result rather than exposing a second,
+ * platform-specific "now save it" step back up to the (platform-neutral)
+ * screen.
+ *
+ * `photo.dispose()` running before the caller uses `capture()`'s returned
+ * `image` is safe, not a use-after-free: verified against
+ * react-native-vision-camera's own `Photo.nitro.ts` documented example,
+ * which explicitly disposes the `Photo` immediately after `toImage()` and
+ * continues using the resulting `Image` afterward — `Image` (unlike
+ * `Photo`) owns independent native memory once created.
  */
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
@@ -55,7 +69,7 @@ function cropToFaceIfKnown(image: Image, faceInfo: LiveFaceInfo): Image {
 }
 
 export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCameraViewProps>(
-  function FaceCameraView({ onFrame }, ref) {
+  function FaceCameraView({ onFrame, onError }, ref) {
     const device = useCameraDevice('front');
     const photoOutput = usePhotoOutput({
       // Matches frameOutput's VGA_4_3 aspect ratio (not its resolution —
@@ -156,7 +170,13 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
     }
 
     return (
-      <Camera style={{ flex: 1 }} device={device} isActive outputs={[photoOutput, frameOutput]} />
+      <Camera
+        style={{ flex: 1 }}
+        device={device}
+        isActive
+        outputs={[photoOutput, frameOutput]}
+        {...(onError ? { onError } : {})}
+      />
     );
   },
 );

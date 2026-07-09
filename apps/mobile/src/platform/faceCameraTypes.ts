@@ -50,4 +50,11 @@ export interface FaceCameraViewProps {
    * their own ref/state from this exactly as they did with the inline
    * vision-camera worklet before this extraction. */
   onFrame: (info: LiveFaceInfo) => void;
+  /** Called when the camera itself fails after mounting — a permission
+   * revoked mid-session, hardware/stream interruption, or (web only) a
+   * `getUserMedia`/model-load failure. Distinct from a rejected
+   * `capture()` call, which the screen's own try/catch around that call
+   * already handles; this covers failures the screen can't otherwise
+   * observe since they happen inside this component's own effects. */
+  onError?: (error: Error) => void;
 }
