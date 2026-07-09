@@ -33,6 +33,7 @@ import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera,
+  CommonResolutions,
   useCameraDevice,
   useCameraPermission,
   useFrameOutput,
@@ -117,6 +118,12 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
   }
 
   const frameOutput = useFrameOutput({
+    // coding-standards.md's Performance section requires downscaling frames
+    // before inference (task 2.A audit) — neither ML Kit face detection nor
+    // the 112x112 MobileFaceNet embedder (task 2.4) benefit from full sensor
+    // resolution, so VGA_4_3 (480x640, matching the front camera's portrait
+    // aspect ratio) is requested instead of the sensor's native ~1280x720+.
+    targetResolution: CommonResolutions.VGA_4_3,
     pixelFormat: 'yuv',
     onFrame(frame) {
       'worklet';
