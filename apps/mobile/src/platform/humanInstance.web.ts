@@ -1,13 +1,14 @@
 /**
  * Shared `@vladmandic/human` singleton for web (ADR-006) — both
- * faceEmbedder.web.ts (embedding) and livenessSignals.web.ts (per-frame
- * eye-openness/head-angle extraction) run detection against the same
- * loaded models, so this lives in one place rather than each module
- * loading its own copy. Model files are self-hosted (not fetched from a
- * CDN, per ADR-015's zero-cost/self-contained requirement) — copied from
- * the installed package into `public/human-models/`, served by Expo's
- * static `public/` folder convention at the same relative path in both
- * `expo start --web` and the exported static build.
+ * faceEmbedder.web.ts (the one-shot, full-config embedding call) and
+ * faceCamera.web.tsx (the continuous, cheap-config per-frame detection
+ * loop that feeds the live guide/liveness challenge) run detection
+ * against the same loaded models, so this lives in one place rather than
+ * each module loading its own copy. Model files are self-hosted (not
+ * fetched from a CDN, per ADR-015's zero-cost/self-contained requirement)
+ * — copied from the installed package into `public/human-models/`,
+ * served by Expo's static `public/` folder convention at the same
+ * relative path in both `expo start --web` and the exported static build.
  */
 import Human, { type Config } from '@vladmandic/human';
 
