@@ -11,8 +11,7 @@ import * as Sharing from 'expo-sharing';
 import { loadToken } from '../services/tokenStorage';
 import { getApiUrl } from '../utils/apiUrl';
 import { formatBearerHeader } from '../utils/authHeader';
-
-const EXPORT_FILENAME = 'attendance.csv';
+import { EXPORT_FILENAME } from './csvExportConstants';
 
 export async function exportAttendanceCsv(): Promise<void> {
   const token = await loadToken();

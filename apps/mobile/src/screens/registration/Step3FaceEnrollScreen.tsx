@@ -1,127 +1,72 @@
 /**
  * Step 3 of registration (requirements.md) — guided left/right/frontal
- * photo capture via react-native-vision-camera (ADR-006), gated by an
- * enrollment quality check (task 2.7, ADR-018) before a capture is
- * accepted. Real embedding computation is still Phase 2 work (task 2.8);
- * this task captures real, quality-checked photos but submits a placeholder
- * embedding so `registerStep3` (which requires non-null vectors) can be
- * wired end-to-end now — task 2.8 replaces `PLACEHOLDER_EMBEDDING` with the
- * real on-device computed vector, no schema change needed.
+ * photo capture (ADR-006), gated by an enrollment quality check (task 2.7,
+ * ADR-018) before a capture is accepted.
  *
- * Task 2.1 adds a real (not stubbed) `useFrameOutput` alongside the existing
- * photo output — the frame pipeline the ML Kit face detector (task 2.2) and
- * the embedder (task 2.4) build on next. `yuv` is used because both ML Kit
- * and LiteRT (the tflite runtime task 2.4 will use) natively consume YUV,
- * per react-native-vision-camera's own guidance — avoids an extra conversion
- * once real per-frame ML work lands.
+ * Task 3.8 extracts this screen's previously-inline
+ * react-native-vision-camera + ML Kit frame-processor code into the shared,
+ * platform-swappable `platform/faceCamera.native.tsx`/`.web.tsx` (used
+ * identically by LoginPunchInScreen) — this screen no longer imports any
+ * camera or ML library directly. `FaceCameraView`'s `capture()` already
+ * returns a platform-appropriately-prepared image (native: cropped to face
+ * bounds; web: the whole frame, since @vladmandic/human's embedder does
+ * its own detection/alignment) plus brightness/sharpness signals, so the
+ * quality-gate → embed → save flow below is now identical on both
+ * platforms.
  *
- * Task 2.2 adds real ML Kit face detection (`useFaceDetector().detectFaces`)
- * inside that same per-frame worklet, rather than a second `CameraOutput` —
- * one frame pipeline doing one detection pass, not two independent ones
- * competing for the same frames. `runClassifications: true` is enabled now
- * (not deferred) since it's what task 2.5/2.6's liveness blink-detection
- * needs (`leftEyeOpenProbability`/`rightEyeOpenProbability`) — a concrete,
- * already-decided near-term need (ADR-018), not speculative. `pitchAngle`/
- * `rollAngle`/`yawAngle` and `bounds` are always present on a detected
- * `Face`, no flag needed. The on-screen debug readout exists to make "real
- * ML Kit data is actually flowing on this device" independently verifiable,
- * not just assumed from a compile.
- *
- * Task 2.7 adds the enrollment quality gate: `handleCapture` now captures an
- * in-memory `Photo` (not straight to a file), measures its brightness/
- * sharpness (`imageQualitySignals.native.ts`) and combines that with the
- * latest live-frame face bounds (`latestFaceInfoRef`, updated every frame
- * regardless of the debug-readout's own throttling) to judge the capture via
- * `assessEnrollmentQuality` (`packages/liveness`'s sibling pure-logic
- * package for this concern, `utils/enrollmentQuality.ts`) — only once
- * accepted is the photo saved to a file and added to `photos`.
- *
- * Task 2.8 replaces `PLACEHOLDER_EMBEDDING` with a real computed vector per
- * angle: the accepted photo's `Image` is cropped to the live-frame face
- * bounds (`utils/faceCrop.ts` maps frame-space bounds into the photo's own
- * coordinate space — valid because `photoOutput` and `frameOutput` are both
- * requested at the same 4:3 aspect ratio, see below) and passed to
- * `faceEmbedder.native.ts`'s `nativeFaceEmbedder` (task 2.4), the first
- * screen to actually use it.
+ * Task 2.7 adds the enrollment quality gate: `handleCapture` measures the
+ * capture's brightness/sharpness and combines that with the latest
+ * live-frame face bounds (`latestFaceInfoRef`, updated every frame
+ * regardless of the debug-readout's own throttling) to judge the capture
+ * via `assessEnrollmentQuality` (`utils/enrollmentQuality.ts`) — only once
+ * accepted is the embedding computed and the angle recorded.
  */
 
+import type { ComponentRef } from 'react';
 import { useRef, useState } from 'react';
 import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  Camera,
-  CommonResolutions,
-  useCameraDevice,
-  useCameraPermission,
-  useFrameOutput,
-  usePhotoOutput,
-} from 'react-native-vision-camera';
-import { useFaceDetector } from 'react-native-vision-camera-face-detector';
-import { scheduleOnRN } from 'react-native-worklets';
 import { Button, H1, Image, Spinner, Text, YStack } from 'tamagui';
 import { FeedbackBanner } from '../../components/FeedbackBanner';
 import { StepProgress } from '../../components/StepProgress';
 import { useRegisterStep3Mutation } from '../../generated/graphql';
 import type { RootScreenProps } from '../../navigation/types';
-import { nativeFaceEmbedder } from '../../platform/faceEmbedder';
-import { measureImageQuality } from '../../platform/imageQualitySignals';
+import { FaceCameraView, useFaceCameraPermission } from '../../platform/faceCamera';
+import type { LiveFaceInfo } from '../../platform/faceCameraTypes';
+import { faceEmbedder } from '../../platform/faceEmbedder';
 import { getErrorMessage } from '../../services/graphqlError';
-import type { FaceBounds } from '../../utils/enrollmentQuality';
 import { assessEnrollmentQuality } from '../../utils/enrollmentQuality';
-import { mapFaceBoundsToCropRect } from '../../utils/faceCrop';
 import {
   assessLiveAlignment,
   MAX_FRONTAL_YAW_DEGREES,
   MIN_PROFILE_YAW_DEGREES,
 } from '../../utils/liveFaceAlignment';
 
-/** A completed, quality-checked capture for one angle: the saved photo (for
- * the thumbnail preview) and its computed embedding (submitted at Finish). */
+/** A completed, quality-checked capture for one angle: a displayable
+ * preview URI (for the thumbnail) and its computed embedding (submitted
+ * at Finish). */
 interface AngleCapture {
-  filePath: string;
+  previewUri: string;
   embedding: number[];
 }
 
 /**
- * The frame/face counters are a debug readout, not a data source anything
- * depends on — updating React state on every single camera frame (30-60/sec)
- * would cause excessive re-renders for no benefit, so JS-side updates are
+ * The frame counter is a debug readout, not a data source anything
+ * depends on — updating React state on every single camera frame would
+ * cause excessive re-renders for no benefit, so JS-side updates are
  * throttled to this interval regardless of how often frames actually arrive.
  */
 const FRAME_STATUS_UPDATE_INTERVAL_MS = 500;
-
-/** Minimal per-frame face summary for the debug readout — task 2.5's
- * liveness work reads its own fields directly off `Face` itself. */
-interface FaceDebugSummary {
-  count: number;
-  leftEyeOpen: number | null;
-  rightEyeOpen: number | null;
-  yawAngle: number | null;
-  bounds: FaceBounds | null;
-}
-
-/**
- * The most recent live frame's face presence/bounds/dimensions, updated on
- * every frame (not just the throttled debug-readout state) so the quality
- * gate always judges against fresh data at the exact moment of capture, not
- * a value that's up to FRAME_STATUS_UPDATE_INTERVAL_MS stale.
- */
-interface LatestFaceInfo {
-  hasFace: boolean;
-  bounds: FaceBounds | null;
-  frameWidth: number;
-  frameHeight: number;
-}
 
 const ANGLES = ['left', 'right', 'frontal'] as const;
 type Angle = (typeof ANGLES)[number];
 
 /**
- * Per-angle live-guide yaw range (task: real-time alignment overlay) — the
- * bound the live yaw must fall within for `assessLiveAlignment` to consider
- * the current angle "aligned". `left`/`right` deliberately leave one side
- * open-ended (`Infinity`): any turn past the minimum still counts as that
- * profile, there's no such thing as "too far turned" for this guide.
+ * Per-angle live-guide yaw range — the bound the live yaw must fall within
+ * for `assessLiveAlignment` to consider the current angle "aligned".
+ * `left`/`right` deliberately leave one side open-ended (`Infinity`): any
+ * turn past the minimum still counts as that profile, there's no such
+ * thing as "too far turned" for this guide.
  */
 const ANGLE_INFO: Record<
   Angle,
@@ -147,98 +92,49 @@ const ANGLE_INFO: Record<
   },
 };
 
+const EMPTY_FACE_INFO: LiveFaceInfo = {
+  hasFace: false,
+  bounds: null,
+  frameWidth: 0,
+  frameHeight: 0,
+  yawAngle: null,
+  leftEyeOpen: null,
+  rightEyeOpen: null,
+};
+
 export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'RegisterStep3'>) {
   const insets = useSafeAreaInsets();
   const { userId } = route.params;
-  const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice('front');
-  const photoOutput = usePhotoOutput({
-    // Matches frameOutput's VGA_4_3 aspect ratio (not its resolution — photos
-    // are captured at a higher tier for embedding quality) so a face's
-    // fractional position in the live frame maps directly onto the photo's
-    // own coordinate space — see utils/faceCrop.ts.
-    targetResolution: CommonResolutions.HD_4_3,
-  });
+  const { hasPermission, requestPermission, hasDevice } = useFaceCameraPermission();
+  const cameraRef = useRef<ComponentRef<typeof FaceCameraView>>(null);
   const [photos, setPhotos] = useState<Partial<Record<Angle, AngleCapture>>>({});
   const [captureError, setCaptureError] = useState<string | null>(null);
-  const [frameStats, setFrameStats] = useState<{
-    count: number;
-    width: number;
-    height: number;
-    face: FaceDebugSummary | null;
-  }>({ count: 0, width: 0, height: 0, face: null });
+  const [frameStats, setFrameStats] = useState<{ count: number; face: LiveFaceInfo }>({
+    count: 0,
+    face: EMPTY_FACE_INFO,
+  });
   const totalFramesSeenRef = useRef(0);
   const lastFrameStatusUpdateRef = useRef(0);
-  const latestFaceInfoRef = useRef<LatestFaceInfo>({
-    hasFace: false,
-    bounds: null,
-    frameWidth: 0,
-    frameHeight: 0,
-  });
-
-  const faceDetector = useFaceDetector({ performanceMode: 'fast', runClassifications: true });
+  const latestFaceInfoRef = useRef<LiveFaceInfo>(EMPTY_FACE_INFO);
 
   /**
-   * Runs on the RN/JS thread (scheduled from the frame-output worklet below)
-   * for every frame. `latestFaceInfoRef` is updated unconditionally so the
-   * quality gate (task 2.7) always reads fresh data at capture time; the
-   * debug-readout `setFrameStats` call below it is throttled since
-   * re-rendering React state on every frame would be wasteful.
+   * Called on every detected frame by FaceCameraView. `latestFaceInfoRef`
+   * is updated unconditionally so the quality gate always reads fresh
+   * data at capture time; the debug-readout `setFrameStats` call below it
+   * is throttled since re-rendering React state on every frame would be
+   * wasteful.
    */
-  function recordFrameSeen(width: number, height: number, face: FaceDebugSummary | null) {
+  function handleFrame(info: LiveFaceInfo) {
     totalFramesSeenRef.current += 1;
-    latestFaceInfoRef.current = {
-      hasFace: (face?.count ?? 0) > 0,
-      bounds: face?.bounds ?? null,
-      frameWidth: width,
-      frameHeight: height,
-    };
+    latestFaceInfoRef.current = info;
 
     const now = Date.now();
     if (now - lastFrameStatusUpdateRef.current < FRAME_STATUS_UPDATE_INTERVAL_MS) {
       return;
     }
     lastFrameStatusUpdateRef.current = now;
-    setFrameStats({ count: totalFramesSeenRef.current, width, height, face });
+    setFrameStats({ count: totalFramesSeenRef.current, face: info });
   }
-
-  const frameOutput = useFrameOutput({
-    // coding-standards.md's Performance section requires downscaling frames
-    // before inference (task 2.A audit) — neither ML Kit face detection nor
-    // the 112x112 MobileFaceNet embedder (task 2.4) benefit from full sensor
-    // resolution, so VGA_4_3 (480x640, matching the front camera's portrait
-    // aspect ratio) is requested instead of the sensor's native ~1280x720+.
-    targetResolution: CommonResolutions.VGA_4_3,
-    pixelFormat: 'yuv',
-    onFrame(frame) {
-      'worklet';
-      const faces = faceDetector.detectFaces(frame);
-      const firstFace = faces[0];
-      const faceSummary: FaceDebugSummary | null = firstFace
-        ? {
-            count: faces.length,
-            leftEyeOpen: firstFace.leftEyeOpenProbability ?? null,
-            rightEyeOpen: firstFace.rightEyeOpenProbability ?? null,
-            yawAngle: firstFace.yawAngle,
-            bounds: firstFace.bounds,
-          }
-        : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null, bounds: null };
-      // ML Kit's InputImage is built with the frame's rotationDegrees (see
-      // react-native-vision-camera-face-detector's ML+HybridFrameSpec.kt), so
-      // `firstFace.bounds` is already reported in the upright/rotated space —
-      // but `frame.width`/`frame.height` deliberately stay in the raw,
-      // pre-rotation sensor space (per Frame.orientation's own docs, physically
-      // rotating buffers is expensive). On a 90°-rotated frame that swap must
-      // be mirrored here, or every downstream consumer of frameWidth/
-      // frameHeight (the quality gate's centering check, the embedding crop)
-      // silently compares bounds against the wrong axis.
-      const isRotated90 = frame.orientation === 'left' || frame.orientation === 'right';
-      const effectiveWidth = isRotated90 ? frame.height : frame.width;
-      const effectiveHeight = isRotated90 ? frame.width : frame.height;
-      scheduleOnRN(recordFrameSeen, effectiveWidth, effectiveHeight, faceSummary);
-      frame.dispose();
-    },
-  });
 
   const { mutate, isPending, error, isError } = useRegisterStep3Mutation({
     onSuccess: () => navigation.navigate('Attendance'),
@@ -248,15 +144,15 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
   const capturedCount = ANGLES.filter((angle) => photos[angle]).length;
 
   // Drives the live guide overlay/capture gating below — reuses the same
-  // throttled `frameStats` the debug readout already computes (task 2.1),
-  // so this adds no extra per-frame state or re-render pressure.
+  // throttled `frameStats` the debug readout already computes, so this
+  // adds no extra per-frame state or re-render pressure.
   const isAligned = nextAngle
     ? assessLiveAlignment({
-        hasFace: (frameStats.face?.count ?? 0) > 0,
-        faceBounds: frameStats.face?.bounds ?? null,
-        frameWidth: frameStats.width,
-        frameHeight: frameStats.height,
-        yawAngle: frameStats.face?.yawAngle ?? null,
+        hasFace: frameStats.face.hasFace,
+        faceBounds: frameStats.face.bounds,
+        frameWidth: frameStats.face.frameWidth,
+        frameHeight: frameStats.face.frameHeight,
+        yawAngle: frameStats.face.yawAngle,
         minYawDegrees: ANGLE_INFO[nextAngle].minYaw,
         maxYawDegrees: ANGLE_INFO[nextAngle].maxYaw,
       })
@@ -268,42 +164,33 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
     }
     setCaptureError(null);
 
-    let photo: Awaited<ReturnType<typeof photoOutput.capturePhoto>> | undefined;
     try {
-      photo = await photoOutput.capturePhoto({}, {});
       const faceInfo = latestFaceInfoRef.current;
+      const captured = await cameraRef.current?.capture();
+      if (!captured) {
+        return;
+      }
 
-      const image = photo.toImage();
-      const { averageBrightness, sharpnessScore } = measureImageQuality(image);
       const quality = assessEnrollmentQuality({
         hasFace: faceInfo.hasFace,
         faceBounds: faceInfo.bounds,
         frameWidth: faceInfo.frameWidth,
         frameHeight: faceInfo.frameHeight,
-        averageBrightness,
-        sharpnessScore,
+        averageBrightness: captured.averageBrightness,
+        sharpnessScore: captured.sharpnessScore,
       });
       if (!quality.accepted || !faceInfo.bounds) {
         setCaptureError(quality.message ?? 'Capture rejected — please try again.');
         return;
       }
 
-      const cropRect = mapFaceBoundsToCropRect(
-        faceInfo.bounds,
-        faceInfo.frameWidth,
-        faceInfo.frameHeight,
-        image.width,
-        image.height,
-      );
-      const faceCrop = image.crop(cropRect.startX, cropRect.startY, cropRect.endX, cropRect.endY);
-      const { embedding } = await nativeFaceEmbedder.computeEmbedding(faceCrop);
-
-      const filePath = await photo.saveToTemporaryFileAsync();
-      setPhotos((prev) => ({ ...prev, [nextAngle]: { filePath, embedding } }));
+      const { embedding } = await faceEmbedder.computeEmbedding(captured.image);
+      setPhotos((prev) => ({
+        ...prev,
+        [nextAngle]: { previewUri: captured.previewUri, embedding },
+      }));
     } catch (err) {
       setCaptureError(getErrorMessage(err, 'Failed to capture photo.'));
-    } finally {
-      photo?.dispose();
     }
   }
 
@@ -348,7 +235,7 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
     );
   }
 
-  if (!device) {
+  if (!hasDevice) {
     return (
       <YStack flex={1} p="$4" background="$background" style={{ justifyContent: 'center' }}>
         <FeedbackBanner variant="error" message="No front camera was found on this device." />
@@ -374,12 +261,7 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             <YStack
               style={{ height: 320, overflow: 'hidden', borderRadius: 8, position: 'relative' }}
             >
-              <Camera
-                style={{ flex: 1 }}
-                device={device}
-                isActive
-                outputs={[photoOutput, frameOutput]}
-              />
+              <FaceCameraView ref={cameraRef} onFrame={handleFrame} />
               {/* Real-time framing guide — turns green once assessLiveAlignment
                   (same size/centering thresholds as the post-capture gate,
                   plus a yaw check for the requested angle) is satisfied, so
@@ -405,9 +287,9 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             </YStack>
             {frameStats.count > 0 ? (
               <Text color="$color10" fontSize="$1">
-                Frame pipeline: {frameStats.count} frames seen ({frameStats.width}x
-                {frameStats.height}) — {frameStats.face?.count ?? 0} face(s)
-                {frameStats.face?.count ? (
+                Frame pipeline: {frameStats.count} frames seen ({frameStats.face.frameWidth}x
+                {frameStats.face.frameHeight}) — {frameStats.face.hasFace ? '1' : '0'} face(s)
+                {frameStats.face.hasFace ? (
                   <>
                     {' '}
                     (eyes: L {frameStats.face.leftEyeOpen?.toFixed(2) ?? '—'} R{' '}
@@ -432,7 +314,7 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             photos[angle] ? (
               <YStack key={angle} gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Image
-                  source={{ uri: `file://${photos[angle].filePath}` }}
+                  source={{ uri: photos[angle].previewUri }}
                   width={60}
                   height={60}
                   style={{ borderRadius: 8 }}
