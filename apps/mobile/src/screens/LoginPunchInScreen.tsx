@@ -22,6 +22,14 @@
  * embedding is computed, while `punchInFace`'s server-side re-verification
  * (ADR-007 — the actual security boundary, task 2.9/2.11) is what actually
  * decides success or failure.
+ *
+ * Task 2.10 adds retry/fallback UX: every failure (challenge timeout,
+ * losing sight of the face mid-capture, or a server-rejected match) bumps
+ * `faceFailureCount`; once it reaches `FACE_FALLBACK_THRESHOLD` the camera
+ * view adds either a "Use Fingerprint Instead" button (if this account/
+ * device supports it) or more specific lighting/positioning guidance —
+ * never both, and only after repeated failures, so a single ordinary retry
+ * isn't treated as if something's badly wrong.
  */
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useEffect, useRef, useState } from 'react';
@@ -59,12 +67,12 @@ import { getFingerprintAuthErrorMessage } from '../utils/fingerprintAuthErrors';
 import { getBestEffortLocation } from '../utils/geolocation';
 import { isValidEmail } from '../utils/validation';
 
-/**
- * How long the camera waits for a completed blink before giving up. Task
- * 2.10 adds the fingerprint-fallback/guidance UX on top of this; this task
- * just stops the challenge from waiting forever.
- */
+/** How long the camera waits for a completed blink before giving up. */
 const FACE_CHALLENGE_TIMEOUT_MS = 15_000;
+
+/** Failed face attempts (timeout, lost-face, or server rejection) before
+ * offering the fingerprint fallback / extra guidance (ADR-018). */
+const FACE_FALLBACK_THRESHOLD = 2;
 
 /** The most recent live frame's face presence/bounds/dimensions — mirrors
  * Step3FaceEnrollScreen's own `LatestFaceInfo` (task 2.7/2.8). */
@@ -88,6 +96,7 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
   const [faceError, setFaceError] = useState<string | null>(null);
   const [isFaceTimedOut, setIsFaceTimedOut] = useState(false);
   const [isProcessingFace, setIsProcessingFace] = useState(false);
+  const [faceFailureCount, setFaceFailureCount] = useState(0);
   const faceCaptureTriggeredRef = useRef(false);
   const latestFaceInfoRef = useRef<LatestFaceInfo>({
     hasFace: false,
@@ -152,7 +161,7 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     onError: () => {
       // The server rejected the match (or another error) — let the user
       // retry the challenge rather than being stuck on a dead camera view.
-      resetFaceChallenge();
+      handleFaceFailure();
     },
   });
 
@@ -197,6 +206,7 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     }
   }
 
+  /** Resets challenge state to try again, without touching the failure count. */
   function resetFaceChallenge() {
     faceCaptureTriggeredRef.current = false;
     setIsFaceTimedOut(false);
@@ -206,14 +216,45 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     setFaceAttemptId((id) => id + 1);
   }
 
+  /** A failed attempt (lost-face mid-capture, or server rejection) — counts
+   * toward the fallback threshold, then immediately resets so the camera
+   * keeps running and the user can try again without an extra tap.
+   * `message` (if given) is applied *after* the reset, since resetFaceChallenge
+   * itself clears faceError — setting it before would just be wiped out. */
+  function handleFaceFailure(message?: string) {
+    setFaceFailureCount((count) => count + 1);
+    resetFaceChallenge();
+    if (message) {
+      setFaceError(message);
+    }
+  }
+
+  /** The "Try Again" button after a timeout — the failure was already
+   * counted when the timeout fired (see the timeout effect below), so this
+   * only resets the challenge state, it doesn't count a second failure. */
+  function handleRetryAfterTimeout() {
+    resetFaceChallenge();
+  }
+
+  /** A fresh start (the "Verify Face" button) — the user is starting over,
+   * not continuing a failure streak, so the count clears. */
   function handleStartFaceVerification() {
+    setFaceFailureCount(0);
     resetFaceChallenge();
     setIsFaceCameraActive(true);
   }
 
   function handleCancelFaceVerification() {
     setIsFaceCameraActive(false);
+    setFaceFailureCount(0);
     resetFaceChallenge();
+  }
+
+  /** Abandons the face path entirely in favor of fingerprint, from the
+   * fallback guidance shown after repeated face failures. */
+  function handleSwitchToFingerprint() {
+    handleCancelFaceVerification();
+    void handleVerifyFingerprint();
   }
 
   /** Runs on the RN/JS thread for every frame — mirrors Step3FaceEnrollScreen's
@@ -281,8 +322,7 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
       photo = await photoOutput.capturePhoto({}, {});
       const faceInfo = latestFaceInfoRef.current;
       if (!faceInfo.hasFace || !faceInfo.bounds) {
-        setFaceError('We lost sight of your face — try again.');
-        resetFaceChallenge();
+        handleFaceFailure('We lost sight of your face — try again.');
         return;
       }
 
@@ -305,8 +345,7 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
         longitude: location?.longitude,
       });
     } catch (err) {
-      setFaceError(getErrorMessage(err, 'Face verification failed.'));
-      resetFaceChallenge();
+      handleFaceFailure(getErrorMessage(err, 'Face verification failed.'));
     } finally {
       photo?.dispose();
       setIsProcessingFace(false);
@@ -330,9 +369,10 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
   }, [liveness.result, isFaceCameraActive]);
 
   // Times the challenge out rather than waiting forever for a blink that
-  // never comes (e.g. camera pointed away) — task 2.10 builds the
-  // fingerprint-fallback guidance on top of this timeout. faceAttemptId isn't
-  // read in the effect body, but it's the deliberate mechanism for
+  // never comes (e.g. camera pointed away). Counts toward the fallback
+  // threshold immediately when it fires (not deferred until "Try Again" is
+  // tapped) — the failed attempt already happened at that point. faceAttemptId
+  // isn't read in the effect body, but it's the deliberate mechanism for
   // restarting the timer when "Try Again" fires while isFaceCameraActive was
   // already true (that boolean alone wouldn't change value in that case).
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
@@ -340,7 +380,10 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     if (!isFaceCameraActive) {
       return;
     }
-    const timer = setTimeout(() => setIsFaceTimedOut(true), FACE_CHALLENGE_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      setIsFaceTimedOut(true);
+      setFaceFailureCount((count) => count + 1);
+    }, FACE_CHALLENGE_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [isFaceCameraActive, faceAttemptId]);
 
@@ -431,8 +474,13 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
                     facePunchErrorMessage={
                       isFacePunchError ? getErrorMessage(facePunchError) : null
                     }
-                    onRetry={handleStartFaceVerification}
+                    showFallbackGuidance={faceFailureCount >= FACE_FALLBACK_THRESHOLD}
+                    canSwitchToFingerprint={
+                      Boolean(identify.fingerprintEnrolled) && hardwareStatus === 'ready'
+                    }
+                    onRetry={handleRetryAfterTimeout}
                     onCancel={handleCancelFaceVerification}
+                    onSwitchToFingerprint={handleSwitchToFingerprint}
                   />
                 ) : null}
 
@@ -477,8 +525,14 @@ interface FaceVerificationCameraProps {
   faceError: string | null;
   isFacePunchError: boolean;
   facePunchErrorMessage: string | null;
+  /** True once repeated failures (ADR-018) warrant showing extra help,
+   * rather than treating every retry as if something's badly wrong. */
+  showFallbackGuidance: boolean;
+  /** Whether this account/device could actually use fingerprint instead. */
+  canSwitchToFingerprint: boolean;
   onRetry: () => void;
   onCancel: () => void;
+  onSwitchToFingerprint: () => void;
 }
 
 /**
@@ -498,8 +552,11 @@ function FaceVerificationCamera({
   faceError,
   isFacePunchError,
   facePunchErrorMessage,
+  showFallbackGuidance,
+  canSwitchToFingerprint,
   onRetry,
   onCancel,
+  onSwitchToFingerprint,
 }: FaceVerificationCameraProps) {
   if (!hasCameraPermission) {
     return (
@@ -535,7 +592,21 @@ function FaceVerificationCamera({
         <FeedbackBanner variant="error" message={facePunchErrorMessage} />
       ) : null}
 
+      {showFallbackGuidance ? (
+        <FeedbackBanner
+          variant="info"
+          message={
+            canSwitchToFingerprint
+              ? 'Having trouble? You can check in with your fingerprint instead.'
+              : 'Having trouble? Make sure your face is well-lit, centered in the frame, and not too far from the camera.'
+          }
+        />
+      ) : null}
+
       {isFaceTimedOut ? <Button onPress={onRetry}>Try Again</Button> : null}
+      {showFallbackGuidance && canSwitchToFingerprint ? (
+        <Button onPress={onSwitchToFingerprint}>Use Fingerprint Instead</Button>
+      ) : null}
       <Button onPress={onCancel}>Cancel</Button>
     </YStack>
   );
