@@ -2,6 +2,17 @@
   "extends": ["expo/tsconfig.base", "../../tsconfig.base.json"],
   "compilerOptions": {
     "strict": true,
-    "types": ["jest"]
+    "types": ["jest"],
+    // TypeScript's own module resolution doesn't know about Metro's
+    // .native.ts/.web.ts platform-suffix bundling convention (ADR-006) —
+    // without this, extensionless platform-split imports (e.g. `from
+    // './faceEmbedder'`) fail to resolve under `tsc`, even though Metro
+    // resolves them correctly per-platform at bundle time. No iOS in this
+    // project's scope, so only `.native` and the bare extensionless
+    // fallback are listed; `.web.ts` files (Phase 3) are still checked via
+    // `expo start --web` actually bundling, not this single tsc pass —
+    // a standard, accepted limitation of typechecking platform-split RN
+    // code in one pass (both variants must share the same interface anyway).
+    "moduleSuffixes": [".native", ""]
   }
 }
