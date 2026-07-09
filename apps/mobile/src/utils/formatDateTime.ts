@@ -20,3 +20,11 @@ export function formatHoursWorked(hours: number): string {
   const minutes = totalMinutes % 60;
   return `${wholeHours}h ${minutes}m`;
 }
+
+export function formatMemberSince(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}

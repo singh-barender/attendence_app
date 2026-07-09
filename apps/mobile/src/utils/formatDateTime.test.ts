@@ -1,4 +1,4 @@
-import { formatHoursWorked } from './formatDateTime';
+import { formatHoursWorked, formatMemberSince } from './formatDateTime';
 
 describe('formatHoursWorked', () => {
   it('formats a whole number of hours with no minutes', () => {
@@ -17,5 +17,11 @@ describe('formatHoursWorked', () => {
 
   it('handles zero hours worked', () => {
     expect(formatHoursWorked(0)).toBe('0h 0m');
+  });
+});
+
+describe('formatMemberSince', () => {
+  it('formats an ISO timestamp as a long date', () => {
+    expect(formatMemberSince('2026-01-05T12:00:00.000Z')).toBe('January 5, 2026');
   });
 });
