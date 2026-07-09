@@ -460,6 +460,51 @@ describe('backend integration', () => {
     });
   });
 
+  it('deletes the account and cascades to enrollments, attendance, and attempts', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Delete Me', email: 'delete.me@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id as string;
+
+    await graphql(
+      'mutation($userId:ID!,$fp:Boolean!){ registerStep2(userId:$userId,fingerprintConfirmed:$fp){ registrationStep } }',
+      { userId, fp: true },
+    );
+    const embedding = [1, 0, 0];
+    await graphql(
+      'mutation($userId:ID!,$e:FaceEmbeddingsInput!){ registerStep3(userId:$userId,embeddings:$e){ registrationStep } }',
+      { userId, e: { left: embedding, right: embedding, frontal: embedding } },
+    );
+    const checkIn = await graphql<{ punchInFingerprint: { token: string } }>(
+      'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ token } }',
+      { userId },
+    );
+    const token = checkIn.data?.punchInFingerprint.token;
+
+    const noAuth = await graphql('mutation{ deleteMyAccount }');
+    expect(noAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
+
+    // Sanity check: real child rows exist across all three cascaded
+    // relations before deletion, so the assertions below prove the cascade
+    // actually removed something, not just that the tables started empty.
+    expect(await prisma.biometricEnrollment.count({ where: { userId } })).toBe(4);
+    expect(await prisma.attendanceRecord.count({ where: { userId } })).toBe(1);
+    expect(await prisma.verificationAttempt.count({ where: { userId } })).toBe(1);
+
+    const deletion = await graphql<{ deleteMyAccount: boolean }>(
+      'mutation{ deleteMyAccount }',
+      undefined,
+      token,
+    );
+    expect(deletion.data?.deleteMyAccount).toBe(true);
+
+    expect(await prisma.user.findUnique({ where: { id: userId } })).toBeNull();
+    expect(await prisma.biometricEnrollment.count({ where: { userId } })).toBe(0);
+    expect(await prisma.attendanceRecord.count({ where: { userId } })).toBe(0);
+    expect(await prisma.verificationAttempt.count({ where: { userId } })).toBe(0);
+  });
+
   it('logs a FAILURE verification attempt when fingerprint is not enrolled', async () => {
     const step1 = await graphql<{ registerStep1: { id: string } }>(
       'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',

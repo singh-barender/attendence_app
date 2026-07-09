@@ -20,5 +20,6 @@ import './types/MyDataExport';
 import './mutations/register';
 import './mutations/punchIn';
 import './mutations/reEnroll';
+import './mutations/deleteMyAccount';
 
 export const schema = builder.toSchema();
