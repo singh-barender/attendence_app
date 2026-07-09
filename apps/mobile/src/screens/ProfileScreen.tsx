@@ -1,10 +1,10 @@
 /**
  * Account info + enrollment status display (task 4.1), re-enrollment
  * actions (task 4.2, ADR-018), a verification-activity audit trail (task
- * 4.4, ADR-019), and a "Download my data" export action (task 4.5,
- * ADR-020) — reads the `me`, `myVerificationAttempts`, and (on demand)
- * `exportMyData` queries. Account deletion and the theme toggle are later
- * Phase 4 tasks and aren't part of this screen yet.
+ * 4.4, ADR-019), and self-service data export + account deletion (task
+ * 4.5/4.6, ADR-020) — reads the `me`, `myVerificationAttempts`, and (on
+ * demand) `exportMyData` queries. The theme toggle is a later Phase 4 task
+ * and isn't part of this screen yet.
  *
  * `useFocusEffect` refetches `me`/`myVerificationAttempts` whenever this
  * screen regains focus — React Navigation keeps this screen instance
@@ -15,13 +15,22 @@
  * auto-fetched (`enabled: false`) — it's an on-demand user action
  * triggered by the Download button, not something every profile visit
  * needs to fetch.
+ *
+ * Account deletion (task 4.6) is irreversible (ADR-020), so it's gated by
+ * a type-to-confirm text input rather than a single tap — this app has no
+ * dialog/modal library anywhere (confirmed against tech-stack.md before
+ * building this: none is installed or pinned), and the interaction is
+ * simple enough to build from primitives already in use here, matching
+ * ADR-021's own reasoning for not adding a library for a single one-off
+ * use.
  */
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
-import { Button, H3, Spinner, Text, XStack, YStack } from 'tamagui';
+import { Button, H3, Input, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import {
+  useDeleteMyAccountMutation,
   useExportMyDataQuery,
   useMeQuery,
   useMyVerificationAttemptsQuery,
@@ -32,7 +41,10 @@ import type { RootScreenProps } from '../navigation/types';
 import { FINGERPRINT_SUPPORTED } from '../platform/biometric';
 import { saveMyDataExport } from '../platform/dataExport';
 import { getErrorMessage } from '../services/graphqlError';
+import { clearToken } from '../services/tokenStorage';
 import { formatAttemptTimestamp, formatMemberSince } from '../utils/formatDateTime';
+
+const DELETE_CONFIRMATION_PHRASE = 'DELETE';
 
 function EnrollmentRow({ label, enrolled }: { label: string; enrolled: boolean }) {
   return (
@@ -87,6 +99,54 @@ function VerificationAttemptRow({
   );
 }
 
+function DeleteAccountConfirmation({
+  onConfirm,
+  onCancel,
+  isDeleting,
+  deleteError,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+  isDeleting: boolean;
+  deleteError: string | null;
+}) {
+  const [confirmText, setConfirmText] = useState('');
+  const canConfirm = confirmText === DELETE_CONFIRMATION_PHRASE;
+
+  return (
+    <YStack gap="$2">
+      <FeedbackBanner
+        variant="error"
+        message="This permanently deletes your account and all attendance, enrollment, and verification data. This cannot be undone."
+      />
+      <Text color="$color10">Type {DELETE_CONFIRMATION_PHRASE} below to confirm.</Text>
+      <Input
+        value={confirmText}
+        onChangeText={setConfirmText}
+        autoCapitalize="characters"
+        placeholder={DELETE_CONFIRMATION_PHRASE}
+        editable={!isDeleting}
+      />
+      {deleteError ? <FeedbackBanner variant="error" message={deleteError} /> : null}
+      <XStack gap="$2">
+        <Button flex={1} onPress={onCancel} disabled={isDeleting}>
+          Cancel
+        </Button>
+        <Button
+          flex={1}
+          background="$red9"
+          color="white"
+          onPress={onConfirm}
+          disabled={!canConfirm || isDeleting}
+          {...(isDeleting ? { icon: <Spinner /> } : {})}
+        >
+          {isDeleting ? 'Deleting...' : 'Permanently delete'}
+        </Button>
+      </XStack>
+    </YStack>
+  );
+}
+
 export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const { data, isLoading, isError, error, refetch, isRefetching } = useMeQuery();
   const {
@@ -100,6 +160,19 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const { refetch: fetchExportData } = useExportMyDataQuery(undefined, { enabled: false });
   const [isDownloadingData, setIsDownloadingData] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+
+  const {
+    mutate: deleteAccount,
+    isPending: isDeleting,
+    isError: isDeleteError,
+    error: deleteError,
+  } = useDeleteMyAccountMutation({
+    onSuccess: async () => {
+      await clearToken();
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -269,6 +342,19 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
             >
               {isDownloadingData ? 'Preparing download...' : 'Download my data'}
             </Button>
+
+            {isConfirmingDelete ? (
+              <DeleteAccountConfirmation
+                onConfirm={() => deleteAccount({})}
+                onCancel={() => setIsConfirmingDelete(false)}
+                isDeleting={isDeleting}
+                deleteError={isDeleteError ? getErrorMessage(deleteError) : null}
+              />
+            ) : (
+              <Button background="$red9" color="white" onPress={() => setIsConfirmingDelete(true)}>
+                Delete my account
+              </Button>
+            )}
           </YStack>
         </YStack>
       ) : null}
