@@ -35,6 +35,14 @@
  * `assessEnrollmentQuality` (`packages/liveness`'s sibling pure-logic
  * package for this concern, `utils/enrollmentQuality.ts`) — only once
  * accepted is the photo saved to a file and added to `photos`.
+ *
+ * Task 2.8 replaces `PLACEHOLDER_EMBEDDING` with a real computed vector per
+ * angle: the accepted photo's `Image` is cropped to the live-frame face
+ * bounds (`utils/faceCrop.ts` maps frame-space bounds into the photo's own
+ * coordinate space — valid because `photoOutput` and `frameOutput` are both
+ * requested at the same 4:3 aspect ratio, see below) and passed to
+ * `faceEmbedder.native.ts`'s `nativeFaceEmbedder` (task 2.4), the first
+ * screen to actually use it.
  */
 
 import { useRef, useState } from 'react';
@@ -55,12 +63,19 @@ import { FeedbackBanner } from '../../components/FeedbackBanner';
 import { StepProgress } from '../../components/StepProgress';
 import { useRegisterStep3Mutation } from '../../generated/graphql';
 import type { RootScreenProps } from '../../navigation/types';
+import { nativeFaceEmbedder } from '../../platform/faceEmbedder.native';
 import { measureImageQuality } from '../../platform/imageQualitySignals.native';
 import { getErrorMessage } from '../../services/graphqlError';
 import type { FaceBounds } from '../../utils/enrollmentQuality';
 import { assessEnrollmentQuality } from '../../utils/enrollmentQuality';
+import { mapFaceBoundsToCropRect } from '../../utils/faceCrop';
 
-const PLACEHOLDER_EMBEDDING = [0];
+/** A completed, quality-checked capture for one angle: the saved photo (for
+ * the thumbnail preview) and its computed embedding (submitted at Finish). */
+interface AngleCapture {
+  filePath: string;
+  embedding: number[];
+}
 
 /**
  * The frame/face counters are a debug readout, not a data source anything
@@ -110,8 +125,14 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
   const { userId } = route.params;
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
-  const photoOutput = usePhotoOutput();
-  const [photos, setPhotos] = useState<Partial<Record<Angle, string>>>({});
+  const photoOutput = usePhotoOutput({
+    // Matches frameOutput's VGA_4_3 aspect ratio (not its resolution — photos
+    // are captured at a higher tier for embedding quality) so a face's
+    // fractional position in the live frame maps directly onto the photo's
+    // own coordinate space — see utils/faceCrop.ts.
+    targetResolution: CommonResolutions.HD_4_3,
+  });
+  const [photos, setPhotos] = useState<Partial<Record<Angle, AngleCapture>>>({});
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [frameStats, setFrameStats] = useState<{
     count: number;
@@ -196,23 +217,35 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
     let photo: Awaited<ReturnType<typeof photoOutput.capturePhoto>> | undefined;
     try {
       photo = await photoOutput.capturePhoto({}, {});
+      const faceInfo = latestFaceInfoRef.current;
 
-      const { averageBrightness, sharpnessScore } = measureImageQuality(photo.toImage());
+      const image = photo.toImage();
+      const { averageBrightness, sharpnessScore } = measureImageQuality(image);
       const quality = assessEnrollmentQuality({
-        hasFace: latestFaceInfoRef.current.hasFace,
-        faceBounds: latestFaceInfoRef.current.bounds,
-        frameWidth: latestFaceInfoRef.current.frameWidth,
-        frameHeight: latestFaceInfoRef.current.frameHeight,
+        hasFace: faceInfo.hasFace,
+        faceBounds: faceInfo.bounds,
+        frameWidth: faceInfo.frameWidth,
+        frameHeight: faceInfo.frameHeight,
         averageBrightness,
         sharpnessScore,
       });
-      if (!quality.accepted) {
-        setCaptureError(quality.message);
+      if (!quality.accepted || !faceInfo.bounds) {
+        setCaptureError(quality.message ?? 'Capture rejected — please try again.');
         return;
       }
 
+      const cropRect = mapFaceBoundsToCropRect(
+        faceInfo.bounds,
+        faceInfo.frameWidth,
+        faceInfo.frameHeight,
+        image.width,
+        image.height,
+      );
+      const faceCrop = image.crop(cropRect.startX, cropRect.startY, cropRect.endX, cropRect.endY);
+      const { embedding } = await nativeFaceEmbedder.computeEmbedding(faceCrop);
+
       const filePath = await photo.saveToTemporaryFileAsync();
-      setPhotos((prev) => ({ ...prev, [nextAngle]: filePath }));
+      setPhotos((prev) => ({ ...prev, [nextAngle]: { filePath, embedding } }));
     } catch (err) {
       setCaptureError(getErrorMessage(err, 'Failed to capture photo.'));
     } finally {
@@ -229,12 +262,15 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
   }
 
   function handleFinish() {
+    if (!photos.left || !photos.right || !photos.frontal) {
+      return;
+    }
     mutate({
       userId,
       embeddings: {
-        left: PLACEHOLDER_EMBEDDING,
-        right: PLACEHOLDER_EMBEDDING,
-        frontal: PLACEHOLDER_EMBEDDING,
+        left: photos.left.embedding,
+        right: photos.right.embedding,
+        frontal: photos.frontal.embedding,
       },
     });
   }
@@ -316,7 +352,7 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             photos[angle] ? (
               <YStack key={angle} gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Image
-                  source={{ uri: `file://${photos[angle]}` }}
+                  source={{ uri: `file://${photos[angle].filePath}` }}
                   width={60}
                   height={60}
                   style={{ borderRadius: 8 }}
