@@ -1,4 +1,9 @@
-import { formatHoursWorked, formatMemberSince } from './formatDateTime';
+import {
+  formatHoursWorked,
+  formatMemberSince,
+  formatMonthYear,
+  toDateOnlyString,
+} from './formatDateTime';
 
 describe('formatHoursWorked', () => {
   it('formats a whole number of hours with no minutes', () => {
@@ -23,5 +28,22 @@ describe('formatHoursWorked', () => {
 describe('formatMemberSince', () => {
   it('formats an ISO timestamp as a long date', () => {
     expect(formatMemberSince('2026-01-05T12:00:00.000Z')).toBe('January 5, 2026');
+  });
+});
+
+describe('formatMonthYear', () => {
+  it('formats a 0-based month index as a full month name with year', () => {
+    expect(formatMonthYear(2026, 0)).toBe('January 2026');
+    expect(formatMonthYear(2026, 11)).toBe('December 2026');
+  });
+});
+
+describe('toDateOnlyString', () => {
+  it('zero-pads single-digit months and days', () => {
+    expect(toDateOnlyString(2026, 0, 5)).toBe('2026-01-05');
+  });
+
+  it('leaves double-digit months and days unpadded', () => {
+    expect(toDateOnlyString(2026, 11, 25)).toBe('2026-12-25');
   });
 });
