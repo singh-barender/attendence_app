@@ -1,0 +1,18 @@
+mutation PunchInFace($userId: ID!, $embedding: [Float!]!, $latitude: Float, $longitude: Float) {
+  punchInFace(userId: $userId, embedding: $embedding, latitude: $latitude, longitude: $longitude) {
+    matched
+    bestScore
+    type
+    token
+    record {
+      id
+      date
+      type
+      method
+      timestamp
+      matchScore
+      latitude
+      longitude
+    }
+  }
+}
