@@ -1,10 +1,10 @@
 /**
  * Account info + enrollment status display (task 4.1), re-enrollment
  * actions (task 4.2, ADR-018), a verification-activity audit trail (task
- * 4.4, ADR-019), and self-service data export + account deletion (task
- * 4.5/4.6, ADR-020) — reads the `me`, `myVerificationAttempts`, and (on
- * demand) `exportMyData` queries. The theme toggle is a later Phase 4 task
- * and isn't part of this screen yet.
+ * 4.4, ADR-019), self-service data export + account deletion (task
+ * 4.5/4.6, ADR-020), and a light/dark theme toggle (task 4.7, ADR-009) —
+ * reads the `me`, `myVerificationAttempts`, and (on demand) `exportMyData`
+ * queries, plus `useThemePreference()` for the toggle.
  *
  * `useFocusEffect` refetches `me`/`myVerificationAttempts` whenever this
  * screen regains focus — React Navigation keeps this screen instance
@@ -29,6 +29,7 @@ import { useCallback, useState } from 'react';
 import { Button, H3, Input, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import {
   useDeleteMyAccountMutation,
   useExportMyDataQuery,
@@ -148,6 +149,7 @@ function DeleteAccountConfirmation({
 }
 
 export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
+  const { resolvedTheme, setPreference } = useThemePreference();
   const { data, isLoading, isError, error, refetch, isRefetching } = useMeQuery();
   const {
     data: attemptsData,
@@ -324,6 +326,36 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 />
               ) : null,
             )}
+          </YStack>
+
+          <YStack
+            gap="$2"
+            borderWidth={1}
+            borderColor="$borderColor"
+            p="$3"
+            style={{ borderRadius: 8 }}
+          >
+            <H3>Appearance</H3>
+            <XStack gap="$2">
+              <Button
+                flex={1}
+                size="$3"
+                background={resolvedTheme === 'light' ? '$color' : '$background'}
+                color={resolvedTheme === 'light' ? '$background' : '$color'}
+                onPress={() => setPreference('light')}
+              >
+                Light
+              </Button>
+              <Button
+                flex={1}
+                size="$3"
+                background={resolvedTheme === 'dark' ? '$color' : '$background'}
+                color={resolvedTheme === 'dark' ? '$background' : '$color'}
+                onPress={() => setPreference('dark')}
+              >
+                Dark
+              </Button>
+            </XStack>
           </YStack>
 
           <YStack
