@@ -74,3 +74,22 @@ export async function getEnrollmentStatus(userId: string): Promise<EnrollmentSta
     ),
   };
 }
+
+/**
+ * Fetches this user's enrolled face embeddings (left/right/frontal, however
+ * many exist) for the server's own independent re-match (ADR-007) — this is
+ * the actual security boundary, so it's never exposed to a client directly;
+ * only `punchInFace`'s resolver reads this to compare against a live
+ * embedding server-side.
+ */
+export async function getFaceEmbeddings(userId: string): Promise<number[][]> {
+  const enrollments = await prisma.biometricEnrollment.findMany({
+    where: { userId, type: { in: [...FACE_ENROLLMENT_TYPES] } },
+    select: { embedding: true },
+  });
+
+  return enrollments
+    .map((enrollment) => enrollment.embedding)
+    .filter((embedding): embedding is string => embedding !== null)
+    .map((embedding) => JSON.parse(embedding) as number[]);
+}

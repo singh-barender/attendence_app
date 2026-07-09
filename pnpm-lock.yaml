@@ -294,6 +294,9 @@ importers:
 
   services/backend:
     dependencies:
+      '@attendance-app/face-matching':
+        specifier: workspace:*
+        version: link:../../packages/face-matching
       '@attendance-app/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

@@ -12,6 +12,7 @@
     "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
+    "@attendance-app/face-matching": "workspace:*",
     "@attendance-app/shared-types": "workspace:*",
     "@prisma/client": "catalog:",
     "@prisma/adapter-better-sqlite3": "catalog:",

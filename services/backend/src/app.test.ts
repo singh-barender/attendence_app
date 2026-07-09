@@ -113,6 +113,100 @@ describe('backend integration', () => {
     expect(csvResponse.body).toContain('CHECK_OUT');
   });
 
+  it('completes a face punch-in when the live embedding matches an enrolled one', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Face User', email: 'face.match@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    // A trivial 3-d embedding is enough to exercise the real cosine-similarity
+    // match logic (packages/face-matching) end-to-end — the point of this
+    // test is the resolver's wiring, not MobileFaceNet's actual output shape.
+    const enrolledEmbedding = [1, 0, 0];
+    await graphql(
+      'mutation($userId:ID!,$e:FaceEmbeddingsInput!){ registerStep3(userId:$userId,embeddings:$e){ registrationStep } }',
+      {
+        userId,
+        e: { left: enrolledEmbedding, right: enrolledEmbedding, frontal: enrolledEmbedding },
+      },
+    );
+
+    const liveEmbedding = [1, 0, 0];
+    const punch = await graphql<{
+      punchInFace: { type: string; matched: boolean; bestScore: number };
+    }>(
+      'mutation($userId:ID!,$emb:[Float!]!){ punchInFace(userId:$userId,embedding:$emb){ type matched bestScore } }',
+      { userId, emb: liveEmbedding },
+    );
+    expect(punch.data?.punchInFace.matched).toBe(true);
+    expect(punch.data?.punchInFace.bestScore).toBeCloseTo(1.0);
+    expect(punch.data?.punchInFace.type).toBe('CHECK_IN');
+
+    const attempts = await prisma.verificationAttempt.findMany({
+      where: { userId: userId as string },
+    });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe('SUCCESS');
+    expect(attempts[0]?.method).toBe('FACE');
+  });
+
+  it('rejects a face punch-in when the live embedding does not match', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Face Mismatch', email: 'face.mismatch@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    const enrolledEmbedding = [1, 0, 0];
+    await graphql(
+      'mutation($userId:ID!,$e:FaceEmbeddingsInput!){ registerStep3(userId:$userId,embeddings:$e){ registrationStep } }',
+      {
+        userId,
+        e: { left: enrolledEmbedding, right: enrolledEmbedding, frontal: enrolledEmbedding },
+      },
+    );
+
+    // Orthogonal to the enrolled embedding — cosine similarity 0, well under MATCH_THRESHOLD.
+    const unmatchedEmbedding = [0, 1, 0];
+    const punch = await graphql(
+      'mutation($userId:ID!,$emb:[Float!]!){ punchInFace(userId:$userId,embedding:$emb){ token } }',
+      { userId, emb: unmatchedEmbedding },
+    );
+    expect(punch.errors?.[0]?.message).toMatch(/did not match/i);
+
+    const attempts = await prisma.verificationAttempt.findMany({
+      where: { userId: userId as string },
+    });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe('FAILURE');
+    expect(attempts[0]?.method).toBe('FACE');
+    expect(attempts[0]?.matchScore).toBeCloseTo(0);
+
+    const records = await prisma.attendanceRecord.findMany({ where: { userId: userId as string } });
+    expect(records).toHaveLength(0);
+  });
+
+  it('logs a FAILURE verification attempt when face is not enrolled', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'No Face', email: 'no.face@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    const punch = await graphql(
+      'mutation($userId:ID!,$emb:[Float!]!){ punchInFace(userId:$userId,embedding:$emb){ token } }',
+      { userId, emb: [1, 0, 0] },
+    );
+    expect(punch.errors?.[0]?.message).toMatch(/not enrolled/i);
+
+    const attempts = await prisma.verificationAttempt.findMany({
+      where: { userId: userId as string },
+    });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe('FAILURE');
+  });
+
   it('logs a FAILURE verification attempt when fingerprint is not enrolled', async () => {
     const step1 = await graphql<{ registerStep1: { id: string } }>(
       'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
