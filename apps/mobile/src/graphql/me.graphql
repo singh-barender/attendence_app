@@ -1,0 +1,14 @@
+query Me {
+  me {
+    fullName
+    email
+    age
+    gender
+    location
+    createdAt
+    enrollmentStatus {
+      faceEnrolled
+      fingerprintEnrolled
+    }
+  }
+}

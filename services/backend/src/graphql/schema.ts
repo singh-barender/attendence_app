@@ -8,6 +8,7 @@ import { builder } from './builder';
 import './queries/health';
 import './queries/identify';
 import './queries/attendanceHistory';
+import './queries/me';
 import './types/User';
 import './types/AttendanceRecord';
 import './types/AttendanceDaySummary';

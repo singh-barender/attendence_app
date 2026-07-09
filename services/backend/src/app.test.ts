@@ -207,6 +207,46 @@ describe('backend integration', () => {
     expect(attempts[0]?.outcome).toBe('FAILURE');
   });
 
+  it('serves the authenticated profile via `me`, rejecting unauthenticated access', async () => {
+    const step1 = await graphql<{ registerStep1: { id: string } }>(
+      'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
+      { fullName: 'Profile User', email: 'profile.user@example.com' },
+    );
+    const userId = step1.data?.registerStep1.id;
+
+    await graphql(
+      'mutation($userId:ID!,$fp:Boolean!){ registerStep2(userId:$userId,fingerprintConfirmed:$fp){ registrationStep } }',
+      { userId, fp: true },
+    );
+
+    const noAuth = await graphql('{ me { email } }');
+    expect(noAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
+
+    const checkIn = await graphql<{ punchInFingerprint: { token: string } }>(
+      'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ token } }',
+      { userId },
+    );
+    const token = checkIn.data?.punchInFingerprint.token;
+
+    const profile = await graphql<{
+      me: {
+        fullName: string;
+        email: string;
+        createdAt: string;
+        enrollmentStatus: { faceEnrolled: boolean; fingerprintEnrolled: boolean };
+      };
+    }>(
+      '{ me { fullName email createdAt enrollmentStatus { faceEnrolled fingerprintEnrolled } } }',
+      undefined,
+      token,
+    );
+    expect(profile.data?.me.fullName).toBe('Profile User');
+    expect(profile.data?.me.email).toBe('profile.user@example.com');
+    expect(profile.data?.me.createdAt).toBeTruthy();
+    expect(profile.data?.me.enrollmentStatus.fingerprintEnrolled).toBe(true);
+    expect(profile.data?.me.enrollmentStatus.faceEnrolled).toBe(false);
+  });
+
   it('logs a FAILURE verification attempt when fingerprint is not enrolled', async () => {
     const step1 = await graphql<{ registerStep1: { id: string } }>(
       'mutation($fullName:String!,$email:String!){ registerStep1(fullName:$fullName,email:$email){ id } }',
