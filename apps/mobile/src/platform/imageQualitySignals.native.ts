@@ -7,7 +7,7 @@
  * than duplicating it.
  */
 import type { Image } from 'react-native-nitro-image';
-import { getRgbByteOffsets } from './faceEmbedder.native';
+import { getRgbByteOffsets } from './faceEmbedder';
 
 /**
  * The quality check only needs a coarse read on exposure/focus, not

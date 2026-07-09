@@ -13,7 +13,7 @@ import { FeedbackBanner } from '../components/FeedbackBanner';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAttendanceHistoryQuery } from '../generated/graphql';
 import type { RootScreenProps } from '../navigation/types';
-import { exportAttendanceCsv } from '../platform/csvExport.native';
+import { exportAttendanceCsv } from '../platform/csvExport';
 import { getErrorMessage } from '../services/graphqlError';
 import { formatDisplayDate, formatHoursWorked, formatPunchTime } from '../utils/formatDateTime';
 

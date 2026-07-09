@@ -56,11 +56,11 @@ import {
 } from '../generated/graphql';
 import { useFingerprintHardwareStatus } from '../hooks/useFingerprintHardwareStatus';
 import type { RootScreenProps } from '../navigation/types';
-import { nativeFaceEmbedder } from '../platform/faceEmbedder.native';
-import { useLivenessChallenge } from '../platform/livenessSignals.native';
+import { nativeFaceEmbedder } from '../platform/faceEmbedder';
+import { useLivenessChallenge } from '../platform/livenessSignals';
 import { setAuthToken } from '../services/graphqlClient';
 import { getErrorMessage } from '../services/graphqlError';
-import { saveToken } from '../services/tokenStorage.native';
+import { saveToken } from '../services/tokenStorage';
 import type { FaceBounds } from '../utils/enrollmentQuality';
 import { mapFaceBoundsToCropRect } from '../utils/faceCrop';
 import { getFingerprintAuthErrorMessage } from '../utils/fingerprintAuthErrors';
