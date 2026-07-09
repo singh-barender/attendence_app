@@ -261,7 +261,11 @@ export function Step3FaceEnrollScreen({ navigation, route }: RootScreenProps<'Re
             <YStack
               style={{ height: 320, overflow: 'hidden', borderRadius: 8, position: 'relative' }}
             >
-              <FaceCameraView ref={cameraRef} onFrame={handleFrame} />
+              <FaceCameraView
+                ref={cameraRef}
+                onFrame={handleFrame}
+                onError={(err) => setCaptureError(getErrorMessage(err, 'Camera error.'))}
+              />
               {/* Real-time framing guide — turns green once assessLiveAlignment
                   (same size/centering thresholds as the post-capture gate,
                   plus a yaw check for the requested angle) is satisfied, so

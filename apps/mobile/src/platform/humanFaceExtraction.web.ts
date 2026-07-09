@@ -1,8 +1,10 @@
 /**
- * Shared @vladmandic/human `FaceResult` -> neutral-signal adapters (task
- * 3.7/3.8) — used by both livenessSignals.web.ts (blink detection) and
- * faceCamera.web.tsx (the live per-frame guide/debug info), so the two
- * don't each reimplement the same extraction.
+ * @vladmandic/human `FaceResult` -> neutral-signal adapters (task 3.7/3.8)
+ * — used by faceCamera.web.tsx to build the shared `LiveFaceInfo` shape
+ * (platform/faceCameraTypes.ts) from Human's raw per-frame detection.
+ * `platform/livenessSignals.ts` never sees a raw `FaceResult` at all —
+ * it consumes the already-neutral `LiveFaceInfo` these adapters produce,
+ * which is what let native and web collapse into one shared liveness file.
  */
 import type { FaceResult } from '@vladmandic/human';
 import { computeEyeOpenProbability, type EyeContourPoint } from './eyeOpenness';

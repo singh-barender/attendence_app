@@ -77,7 +77,11 @@ export function useFaceCameraPermission() {
           return;
         }
         setHasPermission(status.state === 'granted');
-        status.onchange = () => setHasPermission(status.state === 'granted');
+        status.onchange = () => {
+          if (!cancelled) {
+            setHasPermission(status.state === 'granted');
+          }
+        };
       })
       .catch(() => {});
     return () => {
@@ -105,16 +109,19 @@ export function useFaceCameraPermission() {
 export const FaceCameraView = forwardRef<
   FaceCameraViewHandle<HTMLCanvasElement>,
   FaceCameraViewProps
->(function FaceCameraView({ onFrame }, ref) {
+>(function FaceCameraView({ onFrame, onError }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const latestFaceRef = useRef<FaceResult | undefined>(undefined);
 
-  // onFrame is a fresh closure every render (screens don't memoize it);
-  // reading it via a ref instead of a useEffect dependency avoids
-  // tearing down/restarting the camera stream on every render.
+  // onFrame/onError are fresh closures every render (screens don't
+  // memoize them); reading them via refs instead of useEffect
+  // dependencies avoids tearing down/restarting the camera stream on
+  // every render.
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let cancelled = false;
@@ -134,29 +141,51 @@ export const FaceCameraView = forwardRef<
         video.srcObject = stream;
         await video.play();
       }
+      // Re-check after every await, not just the first — getHuman() below
+      // is itself a second, potentially slow, suspend point (model
+      // load/warmup), and unmounting during that gap must not leave an
+      // interval started after cleanup already ran (React StrictMode's
+      // deliberate mount→unmount→remount in development hits exactly this
+      // window on every screen load, not just a rare edge case).
+      if (cancelled) {
+        return;
+      }
 
       const human = await getHuman();
+      if (cancelled) {
+        return;
+      }
       intervalId = setInterval(async () => {
         const currentVideo = videoRef.current;
         if (!currentVideo || currentVideo.readyState < 2) {
           return;
         }
-        // Cheap path: detector + mesh only, description (the expensive
-        // embedding model) stays off for the live per-frame loop — only
-        // capture() below needs it, matching native's split between
-        // per-frame ML Kit detection and one-shot TFLite embedding.
-        const result = await human.detect(currentVideo, {
-          face: { description: { enabled: false } },
-        });
-        const face = result.face[0];
-        latestFaceRef.current = face;
-        onFrameRef.current(
-          faceResultToLiveInfo(face, currentVideo.videoWidth, currentVideo.videoHeight),
-        );
+        try {
+          // Cheap path: detector + mesh only, description (the expensive
+          // embedding model) stays off for the live per-frame loop — only
+          // capture() below needs it, matching native's split between
+          // per-frame ML Kit detection and one-shot TFLite embedding.
+          const result = await human.detect(currentVideo, {
+            face: { description: { enabled: false } },
+          });
+          const face = result.face[0];
+          latestFaceRef.current = face;
+          onFrameRef.current(
+            faceResultToLiveInfo(face, currentVideo.videoWidth, currentVideo.videoHeight),
+          );
+        } catch {
+          // A single bad frame isn't fatal — skip it and let the next
+          // tick retry, rather than surfacing transient per-frame
+          // hiccups as a camera-level onError.
+        }
       }, DETECTION_INTERVAL_MS);
     }
 
-    start();
+    start().catch((err: unknown) => {
+      if (!cancelled) {
+        onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
 
     return () => {
       cancelled = true;
