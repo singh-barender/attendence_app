@@ -1,14 +1,15 @@
 /**
- * Web counterpart to csvExport.native.ts (Phase 3, ADR-014) — browsers have
- * neither a native share sheet nor a general filesystem API, so this
- * triggers the standard browser download pattern instead: wrap the fetched
- * CSV in a Blob, point a hidden anchor's `download` attribute at an object
- * URL for it, and programmatically click it.
+ * Web counterpart to csvExport.native.ts (Phase 3, ADR-014) — fetches the
+ * CSV then hands it to the shared `saveAndShareFile` primitive (task 4.5),
+ * which triggers the standard browser download pattern (Blob + a
+ * programmatically-clicked anchor), rather than duplicating that
+ * mechanism here.
  */
 import { loadToken } from '../services/tokenStorage';
 import { getApiUrl } from '../utils/apiUrl';
 import { formatBearerHeader } from '../utils/authHeader';
 import { EXPORT_FILENAME } from './csvExportConstants';
+import { saveAndShareFile } from './fileExport';
 
 export async function exportAttendanceCsv(): Promise<void> {
   const token = await loadToken();
@@ -24,12 +25,5 @@ export async function exportAttendanceCsv(): Promise<void> {
   }
   const csvText = await response.text();
 
-  const blobUrl = URL.createObjectURL(new Blob([csvText], { type: 'text/csv' }));
-  const link = document.createElement('a');
-  link.href = blobUrl;
-  link.download = EXPORT_FILENAME;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(blobUrl);
+  await saveAndShareFile(csvText, EXPORT_FILENAME, 'text/csv');
 }
