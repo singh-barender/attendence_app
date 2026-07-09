@@ -119,8 +119,14 @@ export function pixelDataToInputTensor(pixelData: RawPixelData): ArrayBuffer {
  * pre-vetted crop," not a fresh detection judgment — the real per-face
  * signals (bounds, eye-openness, head angle) live on ML Kit's own `Face`
  * type and are consumed directly by the caller, not re-derived here.
+ *
+ * Exported as `faceEmbedder` (not e.g. `nativeFaceEmbedder`) because
+ * screens import this via the extensionless `./faceEmbedder` specifier so
+ * Metro can resolve the matching platform file automatically (ADR-006) —
+ * `faceEmbedder.web.ts` must export the identical name for that swap to
+ * actually work.
  */
-export const nativeFaceEmbedder: FaceEmbedder<Image> = {
+export const faceEmbedder: FaceEmbedder<Image> = {
   async computeEmbedding(image: Image): Promise<FaceEmbeddingResult> {
     const model = await getModel();
     const resized = image.resize(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
