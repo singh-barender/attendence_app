@@ -16,6 +16,8 @@ export type RootStackParamList = {
   RegisterStep3: { userId: string };
   Attendance: undefined;
   Profile: undefined;
+  ReEnrollFingerprint: undefined;
+  ReEnrollFace: undefined;
 };
 
 export type RootScreenProps<RouteName extends keyof RootStackParamList> = NativeStackScreenProps<

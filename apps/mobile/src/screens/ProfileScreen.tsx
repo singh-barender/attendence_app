@@ -1,10 +1,18 @@
 /**
- * Account info + enrollment status display (task 4.1) — reads the `me`
- * query, the authenticated counterpart of `identify`'s pre-login lookup.
- * Re-enrollment, verification-attempt audit, data export/delete, and the
- * theme toggle are later Phase 4 tasks (ADR-018, ADR-019, ADR-020) and
- * aren't part of this screen yet.
+ * Account info + enrollment status display (task 4.1) plus re-enrollment
+ * actions (task 4.2, ADR-018) — reads the `me` query, the authenticated
+ * counterpart of `identify`'s pre-login lookup. Verification-attempt audit,
+ * data export/delete, and the theme toggle are later Phase 4 tasks
+ * (ADR-019, ADR-020) and aren't part of this screen yet.
+ *
+ * `useFocusEffect` refetches `me` whenever this screen regains focus —
+ * React Navigation keeps this screen instance mounted underneath
+ * ReEnrollFace/ReEnrollFingerprint rather than remounting it on the way
+ * back, so without an explicit refetch the enrollment status shown here
+ * would still reflect the pre-re-enrollment state.
  */
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
 import { Button, H3, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -36,6 +44,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const { data, isLoading, isError, error, refetch, isRefetching } = useMeQuery();
+
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+    }, [refetch]),
+  );
 
   const errorMessage = isError ? getErrorMessage(error) : null;
   const isUnauthorized = errorMessage?.includes('Unauthorized') ?? false;
@@ -107,6 +121,20 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 enrolled={profile.enrollmentStatus?.fingerprintEnrolled ?? false}
               />
             ) : null}
+            <XStack gap="$2" mt="$2">
+              <Button flex={1} size="$3" onPress={() => navigation.navigate('ReEnrollFace')}>
+                Re-enroll face
+              </Button>
+              {FINGERPRINT_SUPPORTED ? (
+                <Button
+                  flex={1}
+                  size="$3"
+                  onPress={() => navigation.navigate('ReEnrollFingerprint')}
+                >
+                  Re-enroll fingerprint
+                </Button>
+              ) : null}
+            </XStack>
           </YStack>
         </YStack>
       ) : null}

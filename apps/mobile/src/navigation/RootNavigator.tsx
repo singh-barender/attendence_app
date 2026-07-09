@@ -11,6 +11,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AttendanceScreen } from '../screens/AttendanceScreen';
 import { LoginPunchInScreen } from '../screens/LoginPunchInScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { ReEnrollFaceScreen } from '../screens/ReEnrollFaceScreen';
+import { ReEnrollFingerprintScreen } from '../screens/ReEnrollFingerprintScreen';
 import { Step1BasicInfoScreen } from '../screens/registration/Step1BasicInfoScreen';
 import { Step2FingerprintScreen } from '../screens/registration/Step2FingerprintScreen';
 import { Step3FaceEnrollScreen } from '../screens/registration/Step3FaceEnrollScreen';
@@ -44,6 +46,16 @@ export function RootNavigator() {
         />
         <Stack.Screen name="Attendance" component={AttendanceScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen
+          name="ReEnrollFingerprint"
+          component={ReEnrollFingerprintScreen}
+          options={{ title: 'Re-enroll Fingerprint' }}
+        />
+        <Stack.Screen
+          name="ReEnrollFace"
+          component={ReEnrollFaceScreen}
+          options={{ title: 'Re-enroll Face' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
