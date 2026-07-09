@@ -2,12 +2,15 @@
  * Small color-coded pill for an `AttendanceStatus` value — used in the
  * attendance history list (task 1.19). Not `FeedbackBanner`: that's a
  * full-width message banner, this is an inline label next to a date.
+ * `STATUS_STYLES` is exported so `AttendanceCalendar` (task 4.3) reuses the
+ * exact same palette rather than inventing a second color mapping for the
+ * same three statuses.
  */
 import type { ColorTokens } from 'tamagui';
 import { Text, XStack } from 'tamagui';
 import type { AttendanceStatus } from '../generated/graphql';
 
-const STATUS_STYLES: Record<
+export const STATUS_STYLES: Record<
   AttendanceStatus,
   { background: ColorTokens; text: ColorTokens; label: string }
 > = {

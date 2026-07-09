@@ -1,14 +1,16 @@
 /**
- * Attendance history list (task 1.19) — real `attendanceHistory` query, plus
- * the CSV export share flow (task 1.20, ADR-014). Calendar view is deferred
- * to Phase 4 (ADR-021). Requires auth (a session token from a punch-in,
- * task 1.18) — an unauthenticated visit gets a clear "punch in first"
- * message instead of a raw GraphQL error.
+ * Attendance history — list view (task 1.19) plus a color-coded calendar
+ * view (task 4.3, ADR-021), toggled by the user; both read the same
+ * `attendanceHistory` data, so switching views needs no new fetch. Also the
+ * CSV export share flow (task 1.20, ADR-014). Requires auth (a session
+ * token from a punch-in, task 1.18) — an unauthenticated visit gets a clear
+ * "punch in first" message instead of a raw GraphQL error.
  */
 import { useState } from 'react';
 import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, H1, Spinner, Text, XStack, YStack } from 'tamagui';
+import { AttendanceCalendar } from '../components/AttendanceCalendar';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAttendanceHistoryQuery } from '../generated/graphql';
@@ -17,11 +19,14 @@ import { exportAttendanceCsv } from '../platform/csvExport';
 import { getErrorMessage } from '../services/graphqlError';
 import { formatDisplayDate, formatHoursWorked, formatPunchTime } from '../utils/formatDateTime';
 
+type ViewMode = 'list' | 'calendar';
+
 export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) {
   const insets = useSafeAreaInsets();
   const { data, isLoading, isError, error, refetch, isRefetching } = useAttendanceHistoryQuery();
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const errorMessage = isError ? getErrorMessage(error) : null;
   const isUnauthorized = errorMessage?.includes('Unauthorized') ?? false;
@@ -86,33 +91,62 @@ export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) 
           <FeedbackBanner variant="info" message="No attendance recorded yet." />
         ) : null}
 
-        {days.map((day) =>
-          day.date ? (
-            <YStack
-              key={day.date}
-              gap="$2"
-              borderWidth={1}
-              borderColor="$borderColor"
-              p="$3"
-              style={{ borderRadius: 8 }}
+        {!isUnauthorized && !isError && days.length > 0 ? (
+          <XStack gap="$2">
+            <Button
+              flex={1}
+              size="$3"
+              background={viewMode === 'list' ? '$color' : '$background'}
+              color={viewMode === 'list' ? '$background' : '$color'}
+              onPress={() => setViewMode('list')}
             >
-              <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text color="$color" fontWeight="600">
-                  {formatDisplayDate(day.date)}
-                </Text>
-                {day.status ? <StatusBadge status={day.status} /> : null}
-              </XStack>
-              <Text color="$color10">
-                Check-in: {day.checkIn?.timestamp ? formatPunchTime(day.checkIn.timestamp) : '—'}
-                {'   '}
-                Check-out: {day.checkOut?.timestamp ? formatPunchTime(day.checkOut.timestamp) : '—'}
-              </Text>
-              {day.hoursWorked != null ? (
-                <Text color="$color10">Hours worked: {formatHoursWorked(day.hoursWorked)}</Text>
-              ) : null}
-            </YStack>
-          ) : null,
-        )}
+              List
+            </Button>
+            <Button
+              flex={1}
+              size="$3"
+              background={viewMode === 'calendar' ? '$color' : '$background'}
+              color={viewMode === 'calendar' ? '$background' : '$color'}
+              onPress={() => setViewMode('calendar')}
+            >
+              Calendar
+            </Button>
+          </XStack>
+        ) : null}
+
+        {viewMode === 'calendar' && days.length > 0 ? <AttendanceCalendar days={days} /> : null}
+
+        {viewMode === 'list'
+          ? days.map((day) =>
+              day.date ? (
+                <YStack
+                  key={day.date}
+                  gap="$2"
+                  borderWidth={1}
+                  borderColor="$borderColor"
+                  p="$3"
+                  style={{ borderRadius: 8 }}
+                >
+                  <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text color="$color" fontWeight="600">
+                      {formatDisplayDate(day.date)}
+                    </Text>
+                    {day.status ? <StatusBadge status={day.status} /> : null}
+                  </XStack>
+                  <Text color="$color10">
+                    Check-in:{' '}
+                    {day.checkIn?.timestamp ? formatPunchTime(day.checkIn.timestamp) : '—'}
+                    {'   '}
+                    Check-out:{' '}
+                    {day.checkOut?.timestamp ? formatPunchTime(day.checkOut.timestamp) : '—'}
+                  </Text>
+                  {day.hoursWorked != null ? (
+                    <Text color="$color10">Hours worked: {formatHoursWorked(day.hoursWorked)}</Text>
+                  ) : null}
+                </YStack>
+              ) : null,
+            )
+          : null}
 
         <Button onPress={() => navigation.navigate('Profile')}>View profile</Button>
         <YStack style={{ height: insets.bottom }} />
