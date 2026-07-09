@@ -8,11 +8,10 @@
  */
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { loadToken } from '../services/tokenStorage.native';
+import { loadToken } from '../services/tokenStorage';
 import { getApiUrl } from '../utils/apiUrl';
 import { formatBearerHeader } from '../utils/authHeader';
-
-const EXPORT_FILENAME = 'attendance.csv';
+import { EXPORT_FILENAME } from './csvExportConstants';
 
 export async function exportAttendanceCsv(): Promise<void> {
   const token = await loadToken();

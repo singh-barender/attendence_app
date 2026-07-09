@@ -4,13 +4,17 @@
  * whichever biometric method succeeds *is* the login *and* the punch event.
  *
  * Task 2.9 adds the real face path (fingerprint has been real since Phase
- * 1): tapping "Verify Face" starts the same camera + ML Kit frame pipeline
- * used in Step3FaceEnrollScreen (tasks 2.1/2.2), drives a liveness challenge
+ * 1): tapping "Verify Face" starts the camera, drives a liveness challenge
  * (`useLivenessChallenge('blink')`, task 2.6) via `LivenessChallengeOverlay`,
- * and only once a blink is detected does it capture a photo, crop to the
- * live-frame face bounds (`utils/faceCrop.ts`, task 2.8's same aspect-ratio
- * trick between `frameOutput`'s VGA_4_3 and `photoOutput`'s HD_4_3), and
- * compute a live embedding via `faceEmbedder.native.ts`.
+ * and only once a blink is detected does it capture + compute a live
+ * embedding.
+ *
+ * Task 3.8 extracts the previously-inline react-native-vision-camera + ML
+ * Kit frame-processor code into the shared, platform-swappable
+ * `platform/faceCamera.native.tsx`/`.web.tsx` (used identically by
+ * Step3FaceEnrollScreen) — this screen no longer imports any camera or ML
+ * library directly, and its liveness recording now runs against the same
+ * neutral `LiveFaceInfo` shape regardless of platform.
  *
  * There is deliberately **no local match** against the user's enrolled
  * embeddings here — `identify` only ever returns booleans
@@ -32,20 +36,10 @@
  * isn't treated as if something's badly wrong.
  */
 import * as LocalAuthentication from 'expo-local-authentication';
+import type { ComponentRef } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  Camera,
-  CommonResolutions,
-  useCameraDevice,
-  useCameraPermission,
-  useFrameOutput,
-  usePhotoOutput,
-} from 'react-native-vision-camera';
-import type { Face } from 'react-native-vision-camera-face-detector';
-import { useFaceDetector } from 'react-native-vision-camera-face-detector';
-import { scheduleOnRN } from 'react-native-worklets';
 import { Button, H1, Input, Spinner, Text, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { LivenessChallengeOverlay } from '../components/LivenessChallengeOverlay';
@@ -56,13 +50,14 @@ import {
 } from '../generated/graphql';
 import { useFingerprintHardwareStatus } from '../hooks/useFingerprintHardwareStatus';
 import type { RootScreenProps } from '../navigation/types';
-import { nativeFaceEmbedder } from '../platform/faceEmbedder.native';
-import { useLivenessChallenge } from '../platform/livenessSignals.native';
+import { FINGERPRINT_SUPPORTED } from '../platform/biometric';
+import { FaceCameraView, useFaceCameraPermission } from '../platform/faceCamera';
+import type { LiveFaceInfo } from '../platform/faceCameraTypes';
+import { faceEmbedder } from '../platform/faceEmbedder';
+import { useLivenessChallenge } from '../platform/livenessSignals';
 import { setAuthToken } from '../services/graphqlClient';
 import { getErrorMessage } from '../services/graphqlError';
-import { saveToken } from '../services/tokenStorage.native';
-import type { FaceBounds } from '../utils/enrollmentQuality';
-import { mapFaceBoundsToCropRect } from '../utils/faceCrop';
+import { saveToken } from '../services/tokenStorage';
 import { getFingerprintAuthErrorMessage } from '../utils/fingerprintAuthErrors';
 import { getBestEffortLocation } from '../utils/geolocation';
 import { isValidEmail } from '../utils/validation';
@@ -74,14 +69,15 @@ const FACE_CHALLENGE_TIMEOUT_MS = 15_000;
  * offering the fingerprint fallback / extra guidance (ADR-018). */
 const FACE_FALLBACK_THRESHOLD = 2;
 
-/** The most recent live frame's face presence/bounds/dimensions — mirrors
- * Step3FaceEnrollScreen's own `LatestFaceInfo` (task 2.7/2.8). */
-interface LatestFaceInfo {
-  hasFace: boolean;
-  bounds: FaceBounds | null;
-  frameWidth: number;
-  frameHeight: number;
-}
+const EMPTY_FACE_INFO: LiveFaceInfo = {
+  hasFace: false,
+  bounds: null,
+  frameWidth: 0,
+  frameHeight: 0,
+  yawAngle: null,
+  leftEyeOpen: null,
+  rightEyeOpen: null,
+};
 
 export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
   const insets = useSafeAreaInsets();
@@ -98,23 +94,14 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
   const [isProcessingFace, setIsProcessingFace] = useState(false);
   const [faceFailureCount, setFaceFailureCount] = useState(0);
   const faceCaptureTriggeredRef = useRef(false);
-  const latestFaceInfoRef = useRef<LatestFaceInfo>({
-    hasFace: false,
-    bounds: null,
-    frameWidth: 0,
-    frameHeight: 0,
-  });
+  const latestFaceInfoRef = useRef<LiveFaceInfo>(EMPTY_FACE_INFO);
+  const cameraRef = useRef<ComponentRef<typeof FaceCameraView>>(null);
 
-  const { hasPermission: hasCameraPermission, requestPermission: requestCameraPermission } =
-    useCameraPermission();
-  const device = useCameraDevice('front');
-  const photoOutput = usePhotoOutput({
-    // Same aspect-ratio-matching trick as Step3FaceEnrollScreen (task 2.8):
-    // frameOutput's VGA_4_3 and this HD_4_3 share an aspect ratio so
-    // utils/faceCrop.ts's fractional bounds mapping is valid.
-    targetResolution: CommonResolutions.HD_4_3,
-  });
-  const faceDetector = useFaceDetector({ performanceMode: 'fast', runClassifications: true });
+  const {
+    hasPermission: hasCameraPermission,
+    requestPermission: requestCameraPermission,
+    hasDevice,
+  } = useFaceCameraPermission();
   const liveness = useLivenessChallenge('blink');
 
   const { status: hardwareStatus } = useFingerprintHardwareStatus();
@@ -257,68 +244,11 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     void handleVerifyFingerprint();
   }
 
-  /** Runs on the RN/JS thread for every frame — mirrors Step3FaceEnrollScreen's
-   * own recordFrameSeen (task 2.6/2.7), minus the debug-readout throttling
-   * this screen doesn't need. */
-  function recordFrameSeen(
-    width: number,
-    height: number,
-    face: {
-      count: number;
-      leftEyeOpen: number | null;
-      rightEyeOpen: number | null;
-      yawAngle: number | null;
-      bounds: FaceBounds | null;
-    } | null,
-  ) {
-    latestFaceInfoRef.current = {
-      hasFace: (face?.count ?? 0) > 0,
-      bounds: face?.bounds ?? null,
-      frameWidth: width,
-      frameHeight: height,
-    };
-
-    const timestampMs = Date.now();
-    const mlKitFace = face?.count
-      ? ({
-          leftEyeOpenProbability: face.leftEyeOpen,
-          rightEyeOpenProbability: face.rightEyeOpen,
-          yawAngle: face.yawAngle,
-        } as unknown as Face)
-      : undefined;
-    liveness.recordFrame(mlKitFace, timestampMs);
+  /** Called on every detected frame by FaceCameraView. */
+  function handleFrame(info: LiveFaceInfo) {
+    latestFaceInfoRef.current = info;
+    liveness.recordFrame(info, Date.now());
   }
-
-  const frameOutput = useFrameOutput({
-    targetResolution: CommonResolutions.VGA_4_3,
-    pixelFormat: 'yuv',
-    onFrame(frame) {
-      'worklet';
-      const faces = faceDetector.detectFaces(frame);
-      const firstFace = faces[0];
-      const faceSummary = firstFace
-        ? {
-            count: faces.length,
-            leftEyeOpen: firstFace.leftEyeOpenProbability ?? null,
-            rightEyeOpen: firstFace.rightEyeOpenProbability ?? null,
-            yawAngle: firstFace.yawAngle,
-            bounds: firstFace.bounds,
-          }
-        : { count: 0, leftEyeOpen: null, rightEyeOpen: null, yawAngle: null, bounds: null };
-      // ML Kit's InputImage is built with the frame's rotationDegrees, so
-      // `firstFace.bounds` is already in the rotated/upright space, while
-      // `frame.width`/`frame.height` deliberately stay in the raw,
-      // pre-rotation sensor space (see Step3FaceEnrollScreen.tsx's onFrame
-      // for the full explanation — same bug, same fix, needed here too since
-      // `mapFaceBoundsToCropRect` below depends on frameWidth/frameHeight
-      // matching the coordinate space `bounds` is actually in).
-      const isRotated90 = frame.orientation === 'left' || frame.orientation === 'right';
-      const effectiveWidth = isRotated90 ? frame.height : frame.width;
-      const effectiveHeight = isRotated90 ? frame.width : frame.height;
-      scheduleOnRN(recordFrameSeen, effectiveWidth, effectiveHeight, faceSummary);
-      frame.dispose();
-    },
-  });
 
   async function handleFaceCapture() {
     if (!identify?.userId) {
@@ -327,25 +257,19 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     setIsProcessingFace(true);
     setFaceError(null);
 
-    let photo: Awaited<ReturnType<typeof photoOutput.capturePhoto>> | undefined;
     try {
-      photo = await photoOutput.capturePhoto({}, {});
       const faceInfo = latestFaceInfoRef.current;
       if (!faceInfo.hasFace || !faceInfo.bounds) {
         handleFaceFailure('We lost sight of your face — try again.');
         return;
       }
 
-      const image = photo.toImage();
-      const cropRect = mapFaceBoundsToCropRect(
-        faceInfo.bounds,
-        faceInfo.frameWidth,
-        faceInfo.frameHeight,
-        image.width,
-        image.height,
-      );
-      const faceCrop = image.crop(cropRect.startX, cropRect.startY, cropRect.endX, cropRect.endY);
-      const { embedding } = await nativeFaceEmbedder.computeEmbedding(faceCrop);
+      const captured = await cameraRef.current?.capture();
+      if (!captured) {
+        handleFaceFailure('We lost sight of your face — try again.');
+        return;
+      }
+      const { embedding } = await faceEmbedder.computeEmbedding(captured.image);
 
       const location = await getBestEffortLocation();
       punchInFace({
@@ -357,7 +281,6 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     } catch (err) {
       handleFaceFailure(getErrorMessage(err, 'Face verification failed.'));
     } finally {
-      photo?.dispose();
       setIsProcessingFace(false);
     }
   }
@@ -447,14 +370,18 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
                   />
                 ) : null}
 
-                {identify.fingerprintEnrolled && hardwareStatus === 'no-hardware' ? (
+                {FINGERPRINT_SUPPORTED &&
+                identify.fingerprintEnrolled &&
+                hardwareStatus === 'no-hardware' ? (
                   <FeedbackBanner
                     variant="error"
                     message="This device has no biometric hardware. Fingerprint check-in isn't available here."
                   />
                 ) : null}
 
-                {identify.fingerprintEnrolled && hardwareStatus === 'not-enrolled' ? (
+                {FINGERPRINT_SUPPORTED &&
+                identify.fingerprintEnrolled &&
+                hardwareStatus === 'not-enrolled' ? (
                   <FeedbackBanner
                     variant="error"
                     message="No fingerprint is enrolled on this device. Enroll one in Settings, then retry."
@@ -471,11 +398,14 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
 
                 {identify.faceEnrolled && isFaceCameraActive ? (
                   <FaceVerificationCamera
+                    cameraRef={cameraRef}
                     hasCameraPermission={hasCameraPermission}
                     requestCameraPermission={requestCameraPermission}
-                    device={device}
-                    photoOutput={photoOutput}
-                    frameOutput={frameOutput}
+                    hasDevice={hasDevice}
+                    onFrame={handleFrame}
+                    onCameraError={(err) =>
+                      handleFaceFailure(getErrorMessage(err, 'Camera error.'))
+                    }
                     liveness={liveness}
                     isFaceTimedOut={isFaceTimedOut}
                     isProcessingFace={isProcessingFace || isPunchingInFace}
@@ -486,7 +416,9 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
                     }
                     showFallbackGuidance={faceFailureCount >= FACE_FALLBACK_THRESHOLD}
                     canSwitchToFingerprint={
-                      Boolean(identify.fingerprintEnrolled) && hardwareStatus === 'ready'
+                      FINGERPRINT_SUPPORTED &&
+                      Boolean(identify.fingerprintEnrolled) &&
+                      hardwareStatus === 'ready'
                     }
                     onRetry={handleRetryAfterTimeout}
                     onCancel={handleCancelFaceVerification}
@@ -498,7 +430,8 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
                   <Button onPress={handleStartFaceVerification}>Verify Face</Button>
                 ) : null}
 
-                {identify.fingerprintEnrolled &&
+                {FINGERPRINT_SUPPORTED &&
+                identify.fingerprintEnrolled &&
                 hardwareStatus === 'ready' &&
                 !isFaceCameraActive ? (
                   <Button
@@ -524,11 +457,12 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
 }
 
 interface FaceVerificationCameraProps {
+  cameraRef: React.Ref<ComponentRef<typeof FaceCameraView>>;
   hasCameraPermission: boolean;
   requestCameraPermission: () => Promise<boolean>;
-  device: ReturnType<typeof useCameraDevice>;
-  photoOutput: ReturnType<typeof usePhotoOutput>;
-  frameOutput: ReturnType<typeof useFrameOutput>;
+  hasDevice: boolean;
+  onFrame: (info: LiveFaceInfo) => void;
+  onCameraError: (error: Error) => void;
   liveness: ReturnType<typeof useLivenessChallenge>;
   isFaceTimedOut: boolean;
   isProcessingFace: boolean;
@@ -551,11 +485,12 @@ interface FaceVerificationCameraProps {
  * just renders what the parent's hooks/refs already computed.
  */
 function FaceVerificationCamera({
+  cameraRef,
   hasCameraPermission,
   requestCameraPermission,
-  device,
-  photoOutput,
-  frameOutput,
+  hasDevice,
+  onFrame,
+  onCameraError,
   liveness,
   isFaceTimedOut,
   isProcessingFace,
@@ -578,14 +513,14 @@ function FaceVerificationCamera({
     );
   }
 
-  if (!device) {
+  if (!hasDevice) {
     return <FeedbackBanner variant="error" message="No front camera was found on this device." />;
   }
 
   return (
     <YStack gap="$2">
       <YStack style={{ height: 320, overflow: 'hidden', borderRadius: 8 }}>
-        <Camera style={{ flex: 1 }} device={device} isActive outputs={[photoOutput, frameOutput]} />
+        <FaceCameraView ref={cameraRef} onFrame={onFrame} onError={onCameraError} />
       </YStack>
 
       <LivenessChallengeOverlay type="blink" result={liveness.result} timedOut={isFaceTimedOut} />

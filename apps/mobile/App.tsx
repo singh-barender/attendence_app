@@ -16,7 +16,7 @@ import { TamaguiProvider } from 'tamagui';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { setAuthToken } from './src/services/graphqlClient';
 import { queryClient } from './src/services/queryClient';
-import { loadToken } from './src/services/tokenStorage.native';
+import { loadToken } from './src/services/tokenStorage';
 import { tamaguiConfig } from './tamagui.config';
 
 export default function App() {

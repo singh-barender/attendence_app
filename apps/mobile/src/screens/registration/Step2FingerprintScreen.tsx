@@ -14,6 +14,7 @@ import { StepProgress } from '../../components/StepProgress';
 import { useRegisterStep2Mutation } from '../../generated/graphql';
 import { useFingerprintHardwareStatus } from '../../hooks/useFingerprintHardwareStatus';
 import type { RootScreenProps } from '../../navigation/types';
+import { FINGERPRINT_SUPPORTED } from '../../platform/biometric';
 import { getErrorMessage } from '../../services/graphqlError';
 import { getFingerprintAuthErrorMessage } from '../../utils/fingerprintAuthErrors';
 
@@ -39,6 +40,38 @@ export function Step2FingerprintScreen({ navigation, route }: RootScreenProps<'R
     }
 
     mutate({ userId, fingerprintConfirmed: true });
+  }
+
+  /** Fingerprint is Android-only (ADR-005) — web skips straight past this
+   * step rather than blocking registration on hardware that will never
+   * exist here, recording `fingerprintConfirmed: false` as the accurate
+   * outcome (not attempted, not merely failed). */
+  function handleSkip() {
+    mutate({ userId, fingerprintConfirmed: false });
+  }
+
+  if (!FINGERPRINT_SUPPORTED) {
+    return (
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+        <YStack flex={1} gap="$4" p="$4" background="$background">
+          <H1>Confirm Fingerprint</H1>
+          <StepProgress step={2} total={3} label="Fingerprint" />
+          <Text color="$color10">
+            Fingerprint check-in isn't available on web — browsers don't expose the OS fingerprint
+            sensor. Face enrollment (next step) is all you need to check in from here.
+          </Text>
+          {isError ? <FeedbackBanner variant="error" message={getErrorMessage(error)} /> : null}
+          <Button
+            onPress={handleSkip}
+            disabled={isPending}
+            {...(isPending ? { icon: <Spinner /> } : {})}
+          >
+            {isPending ? 'Continuing...' : 'Continue'}
+          </Button>
+          <YStack style={{ height: insets.bottom }} />
+        </YStack>
+      </ScrollView>
+    );
   }
 
   return (
