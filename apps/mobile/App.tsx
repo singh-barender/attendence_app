@@ -23,12 +23,23 @@
  * goes through a nested `<Theme name={resolvedTheme}>`, which does react
  * to prop changes, so ProfileScreen's toggle takes effect immediately
  * without remounting the whole provider tree.
+ *
+ * `GradientBackground` (user-requested redesign) is mounted once here,
+ * behind the whole navigator — every screen's own background is
+ * transparent (`RootNavigator`'s `screenOptions`) so this one gradient
+ * shows through everywhere instead of each screen painting its own.
+ * `@tamagui/native/setup-expo-linear-gradient` must run before any
+ * `LinearGradient` renders on native, or it silently renders nothing
+ * (confirmed from the library's own source) — importing it here, once, at
+ * the app's actual entry point is the documented way to do that.
  */
+import '@tamagui/native/setup-expo-linear-gradient';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { TamaguiProvider, Theme } from 'tamagui';
+import { GradientBackground } from './src/components/GradientBackground';
 import { ThemePreferenceProvider, useThemePreference } from './src/contexts/ThemePreferenceContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { setAuthToken } from './src/services/graphqlClient';
@@ -46,7 +57,9 @@ function AppContent() {
   return (
     <TamaguiProvider config={tamaguiConfig} defaultTheme={resolvedTheme}>
       <Theme name={resolvedTheme}>
-        <RootNavigator />
+        <GradientBackground>
+          <RootNavigator />
+        </GradientBackground>
         <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
       </Theme>
     </TamaguiProvider>

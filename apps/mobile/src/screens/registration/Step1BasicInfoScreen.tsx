@@ -6,15 +6,18 @@
  */
 import { MAX_REGISTRATION_AGE, MIN_REGISTRATION_AGE } from '@attendance-app/shared-types';
 import { useState } from 'react';
-import { ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, Fieldset, H1, Input, Label, Spinner, Text, YStack } from 'tamagui';
+import { Button, Fieldset, Input, Label, Spinner, Text } from 'tamagui';
 import { FeedbackBanner } from '../../components/FeedbackBanner';
+import { GlassCard } from '../../components/GlassCard';
+import { IconInput } from '../../components/IconInput';
 import { InlineSelectField } from '../../components/InlineSelectField';
+import { ScreenContainer } from '../../components/ScreenContainer';
 import { StepProgress } from '../../components/StepProgress';
+import { useThemePreference } from '../../contexts/ThemePreferenceContext';
 import { useRegisterStep1Mutation } from '../../generated/graphql';
 import type { RootScreenProps } from '../../navigation/types';
 import { getErrorMessage } from '../../services/graphqlError';
+import { GLASS_PALETTES } from '../../theme/glassPalette';
 import { isValidEmail } from '../../utils/validation';
 
 const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'] as const;
@@ -26,7 +29,8 @@ interface FieldErrors {
 }
 
 export function Step1BasicInfoScreen({ navigation }: RootScreenProps<'RegisterStep1'>) {
-  const insets = useSafeAreaInsets();
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [age, setAge] = useState('');
@@ -77,18 +81,16 @@ export function Step1BasicInfoScreen({ navigation }: RootScreenProps<'RegisterSt
   }
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-      <YStack flex={1} gap="$4" p="$4" background="$background">
-        <H1>Basic Info</H1>
-        <StepProgress step={1} total={3} label="Basic info" />
-        <Text color="$color10">
-          Let's start with a few details about you. Your email will be how you're identified when
-          you check in and out later — no password needed.
-        </Text>
-
+    <ScreenContainer
+      title="Basic Info"
+      description="Let's start with a few details about you. Your email will be how you're identified when you check in and out later — no password needed."
+      progress={<StepProgress step={1} total={3} label="Basic info" />}
+    >
+      <GlassCard gap="$3">
         <Fieldset gap="$2">
           <Label htmlFor="fullName">Full name</Label>
-          <Input
+          <IconInput
+            icon="person-outline"
             id="fullName"
             value={fullName}
             onChangeText={(text) => {
@@ -106,7 +108,8 @@ export function Step1BasicInfoScreen({ navigation }: RootScreenProps<'RegisterSt
 
         <Fieldset gap="$2">
           <Label htmlFor="email">Email</Label>
-          <Input
+          <IconInput
+            icon="mail-outline"
             id="email"
             value={email}
             onChangeText={(text) => {
@@ -149,7 +152,8 @@ export function Step1BasicInfoScreen({ navigation }: RootScreenProps<'RegisterSt
 
         <Fieldset gap="$2">
           <Label htmlFor="location">Location (optional)</Label>
-          <Input
+          <IconInput
+            icon="location-outline"
             id="location"
             value={location}
             onChangeText={setLocation}
@@ -163,12 +167,14 @@ export function Step1BasicInfoScreen({ navigation }: RootScreenProps<'RegisterSt
         <Button
           onPress={handleSubmit}
           disabled={isPending}
+          style={{ backgroundColor: palette.accent }}
           {...(isPending ? { icon: <Spinner /> } : {})}
         >
-          {isPending ? 'Submitting...' : 'Next: Fingerprint'}
+          <Text style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}>
+            {(isPending ? 'Submitting...' : 'Next: Fingerprint').toUpperCase()}
+          </Text>
         </Button>
-        <YStack style={{ height: insets.bottom }} />
-      </YStack>
-    </ScrollView>
+      </GlassCard>
+    </ScreenContainer>
   );
 }

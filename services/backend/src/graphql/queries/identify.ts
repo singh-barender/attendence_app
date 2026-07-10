@@ -1,7 +1,10 @@
 /**
  * `identify` — looks a user up by email (the account lookup key, ADR-004)
  * and reports which biometric methods they've enrolled, so the client knows
- * which punch-in buttons to show.
+ * which punch-in buttons to show. Also exposes `registrationStep` (1|2|3,
+ * `User.registrationStep`) so the client can resume an incomplete
+ * registration wizard — without it, a user who dropped off after Step 1/2
+ * has no way back into the wizard and their email is stuck unusable.
  */
 import * as enrollmentService from '../../services/enrollmentService';
 import * as userService from '../../services/userService';
@@ -12,6 +15,7 @@ export interface IdentifyResultShape {
   fullName: string;
   faceEnrolled: boolean;
   fingerprintEnrolled: boolean;
+  registrationStep: number;
 }
 
 const IdentifyResult = builder.objectRef<IdentifyResultShape>('IdentifyResult').implement({
@@ -20,6 +24,7 @@ const IdentifyResult = builder.objectRef<IdentifyResultShape>('IdentifyResult').
     fullName: t.exposeString('fullName'),
     faceEnrolled: t.exposeBoolean('faceEnrolled'),
     fingerprintEnrolled: t.exposeBoolean('fingerprintEnrolled'),
+    registrationStep: t.exposeInt('registrationStep'),
   }),
 });
 
@@ -35,6 +40,7 @@ builder.queryField('identify', (t) =>
       return {
         userId: user.id,
         fullName: user.fullName,
+        registrationStep: user.registrationStep,
         ...status,
       };
     },

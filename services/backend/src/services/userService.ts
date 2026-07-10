@@ -4,7 +4,11 @@
  * entry point ever needs the same rules (ADR-011's zod-for-business-rules
  * stance).
  */
-import { MAX_REGISTRATION_AGE, MIN_REGISTRATION_AGE } from '@attendance-app/shared-types';
+import {
+  ACCOUNT_NOT_FOUND_MESSAGE,
+  MAX_REGISTRATION_AGE,
+  MIN_REGISTRATION_AGE,
+} from '@attendance-app/shared-types';
 import { z } from 'zod';
 import { prisma } from '../db/client';
 import type { User } from '../generated/prisma/client';
@@ -38,7 +42,7 @@ export async function assertEmailNotRegistered(email: string): Promise<void> {
 export async function findUserByEmail(email: string): Promise<User> {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
-    throw new Error('No account found for this email');
+    throw new Error(ACCOUNT_NOT_FOUND_MESSAGE);
   }
   return user;
 }

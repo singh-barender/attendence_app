@@ -16,16 +16,17 @@
 import type { ComponentRef, ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { Button, Image, Spinner, Text, YStack } from 'tamagui';
+import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import { FaceCameraView, useFaceCameraPermission } from '../platform/faceCamera';
 import type { LiveFaceInfo } from '../platform/faceCameraTypes';
 import { faceEmbedder } from '../platform/faceEmbedder';
 import { getErrorMessage } from '../services/graphqlError';
+import { GLASS_PALETTES } from '../theme/glassPalette';
 import { assessEnrollmentQuality } from '../utils/enrollmentQuality';
-import {
-  assessLiveAlignment,
-  MAX_FRONTAL_YAW_DEGREES,
-  MIN_PROFILE_YAW_DEGREES,
-} from '../utils/liveFaceAlignment';
+import { ANGLE_INFO, ANGLES, type Angle } from '../utils/faceAngles';
+import { assessLiveAlignment } from '../utils/liveFaceAlignment';
+import { FaceAlignmentMask } from './FaceAlignmentMask';
+import { FaceAngleHint } from './FaceAngleHint';
 import { FeedbackBanner } from './FeedbackBanner';
 
 export interface FaceEnrollmentEmbeddings {
@@ -47,39 +48,10 @@ interface AngleCapture {
  */
 const FRAME_STATUS_UPDATE_INTERVAL_MS = 500;
 
-const ANGLES = ['left', 'right', 'frontal'] as const;
-type Angle = (typeof ANGLES)[number];
-
-/**
- * Per-angle live-guide yaw range — the bound the live yaw must fall within
- * for `assessLiveAlignment` to consider the current angle "aligned".
- * `left`/`right` deliberately leave one side open-ended (`Infinity`): any
- * turn past the minimum still counts as that profile, there's no such
- * thing as "too far turned" for this guide.
- */
-const ANGLE_INFO: Record<
-  Angle,
-  { label: string; instruction: string; minYaw: number; maxYaw: number }
-> = {
-  left: {
-    label: 'Left profile',
-    instruction: 'Turn your head slightly to show your left profile',
-    minYaw: -Infinity,
-    maxYaw: -MIN_PROFILE_YAW_DEGREES,
-  },
-  right: {
-    label: 'Right profile',
-    instruction: 'Turn your head slightly to show your right profile',
-    minYaw: MIN_PROFILE_YAW_DEGREES,
-    maxYaw: Infinity,
-  },
-  frontal: {
-    label: 'Frontal',
-    instruction: 'Face the camera directly',
-    minYaw: -MAX_FRONTAL_YAW_DEGREES,
-    maxYaw: MAX_FRONTAL_YAW_DEGREES,
-  },
-};
+/** Alignment-oval bounding box — also the size of the clear "window" left
+ * in `FaceAlignmentMask`'s blurred surround, so the two must stay in sync. */
+const ALIGNMENT_OVAL_WIDTH = 170;
+const ALIGNMENT_OVAL_HEIGHT = 230;
 
 const EMPTY_FACE_INFO: LiveFaceInfo = {
   hasFace: false,
@@ -112,10 +84,13 @@ export function FaceEnrollmentCapture({
   finishingLabel,
   progress,
 }: FaceEnrollmentCaptureProps) {
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   const { hasPermission, requestPermission, hasDevice } = useFaceCameraPermission();
   const cameraRef = useRef<ComponentRef<typeof FaceCameraView>>(null);
   const [photos, setPhotos] = useState<Partial<Record<Angle, AngleCapture>>>({});
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [cameraLayoutSize, setCameraLayoutSize] = useState({ width: 0, height: 0 });
   const [frameStats, setFrameStats] = useState<{ count: number; face: LiveFaceInfo }>({
     count: 0,
     face: EMPTY_FACE_INFO,
@@ -220,10 +195,15 @@ export function FaceEnrollmentCapture({
     return (
       <YStack gap="$4">
         {progress}
-        <Text color="$color10">
+        <FaceAngleHint />
+        <Text style={{ color: palette.inkSoft }}>
           We need camera access to capture your left, right, and frontal profile photos.
         </Text>
-        <Button onPress={requestPermission}>Grant Camera Access</Button>
+        <Button onPress={requestPermission} size="$4" style={{ backgroundColor: palette.accent }}>
+          <Text style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}>
+            GRANT CAMERA ACCESS
+          </Text>
+        </Button>
       </YStack>
     );
   }
@@ -240,49 +220,54 @@ export function FaceEnrollmentCapture({
   return (
     <YStack gap="$4">
       {progress}
-      <Text color="$color10">
+      <Text style={{ color: palette.inkSoft }}>
         Capture three angles so we can recognize you at check-in: left profile, right profile, and a
         straight-on frontal shot ({capturedCount} of {ANGLES.length} captured).
       </Text>
 
       {nextAngle ? (
         <>
-          <Text color="$color" fontWeight="600">
+          <Text style={{ color: palette.ink, fontWeight: '600' }}>
             {ANGLE_INFO[nextAngle].instruction}
           </Text>
           <YStack
-            style={{ height: 320, overflow: 'hidden', borderRadius: 8, position: 'relative' }}
+            onLayout={(event) => {
+              const { width, height } = event.nativeEvent.layout;
+              setCameraLayoutSize({ width, height });
+            }}
+            style={{
+              height: 320,
+              overflow: 'hidden',
+              borderRadius: 12,
+              position: 'relative',
+              borderWidth: 1,
+              borderColor: palette.glassBorder,
+            }}
           >
             <FaceCameraView
               ref={cameraRef}
               onFrame={handleFrame}
               onError={(err) => setCaptureError(getErrorMessage(err, 'Camera error.'))}
             />
-            {/* Real-time framing guide — turns green once assessLiveAlignment
-                (same size/centering thresholds as the post-capture gate,
-                plus a yaw check for the requested angle) is satisfied, so
-                the user gets steering feedback before tapping Capture
-                instead of only a rejection message after. */}
-            <YStack
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <YStack
-                borderColor={isAligned ? '$green9' : '$red9'}
-                style={{ width: 170, height: 230, borderRadius: 999, borderWidth: 4 }}
-              />
-            </YStack>
+            {/* Blurs everything outside the alignment oval's bounding box so
+                attention goes to the one region a face needs to sit in,
+                rather than an equally-sharp full-frame preview — turns the
+                oval's border green once assessLiveAlignment (same size/
+                centering thresholds as the post-capture gate, plus a yaw
+                check for the requested angle) is satisfied, so the user
+                gets steering feedback before tapping Capture instead of
+                only a rejection message after. */}
+            <FaceAlignmentMask
+              containerWidth={cameraLayoutSize.width}
+              containerHeight={cameraLayoutSize.height}
+              ovalWidth={ALIGNMENT_OVAL_WIDTH}
+              ovalHeight={ALIGNMENT_OVAL_HEIGHT}
+              isAligned={isAligned}
+              palette={palette}
+            />
           </YStack>
           {frameStats.count > 0 ? (
-            <Text color="$color10" fontSize="$1">
+            <Text style={{ color: palette.inkSoft }} fontSize="$1">
               Frame pipeline: {frameStats.count} frames seen ({frameStats.face.frameWidth}x
               {frameStats.face.frameHeight}) — {frameStats.face.hasFace ? '1' : '0'} face(s)
               {frameStats.face.hasFace ? (
@@ -295,8 +280,22 @@ export function FaceEnrollmentCapture({
               ) : null}
             </Text>
           ) : null}
-          <Button onPress={handleCapture} disabled={!isAligned} mt="$2">
-            {isAligned ? `Capture ${ANGLE_INFO[nextAngle].label}` : 'Align your face in the frame'}
+          <Button
+            onPress={handleCapture}
+            disabled={!isAligned}
+            mt="$2"
+            style={{ backgroundColor: isAligned ? palette.accent : undefined }}
+          >
+            <Text
+              style={{
+                color: isAligned ? palette.accentInk : palette.inkSoft,
+                fontWeight: '700',
+              }}
+            >
+              {isAligned
+                ? `Capture ${ANGLE_INFO[nextAngle].label}`
+                : 'Align your face in the frame'}
+            </Text>
           </Button>
         </>
       ) : (
@@ -313,7 +312,7 @@ export function FaceEnrollmentCapture({
                 height={60}
                 style={{ borderRadius: 8 }}
               />
-              <Text color="$color" flex={1}>
+              <Text style={{ color: palette.ink }} flex={1}>
                 {ANGLE_INFO[angle].label}
               </Text>
               <Button size="$2" onPress={() => handleRetake(angle)}>
@@ -331,9 +330,12 @@ export function FaceEnrollmentCapture({
         <Button
           onPress={handleFinish}
           disabled={isSubmitting}
+          style={{ backgroundColor: palette.accent }}
           {...(isSubmitting ? { icon: <Spinner /> } : {})}
         >
-          {isSubmitting ? finishingLabel : finishLabel}
+          <Text style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}>
+            {(isSubmitting ? finishingLabel : finishLabel).toUpperCase()}
+          </Text>
         </Button>
       ) : null}
     </YStack>

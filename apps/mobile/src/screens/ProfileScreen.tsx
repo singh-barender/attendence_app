@@ -26,8 +26,9 @@
  */
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
-import { Button, H3, Input, Spinner, Text, XStack, YStack } from 'tamagui';
+import { Button, Input, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { GlassCard } from '../components/GlassCard';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import {
@@ -43,15 +44,42 @@ import { FINGERPRINT_SUPPORTED } from '../platform/biometric';
 import { saveMyDataExport } from '../platform/dataExport';
 import { getErrorMessage } from '../services/graphqlError';
 import { clearToken } from '../services/tokenStorage';
+import { GLASS_PALETTES } from '../theme/glassPalette';
 import { formatAttemptTimestamp, formatMemberSince } from '../utils/formatDateTime';
 
 const DELETE_CONFIRMATION_PHRASE = 'DELETE';
 
+/** Small uppercase "eyebrow" section heading, matching the glass-card
+ * aesthetic — used in place of a plain `H3` at the top of every card. */
+function SectionHeading({ children }: { children: string }) {
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
+  return (
+    <Text
+      style={{
+        color: palette.accent,
+        fontSize: 12,
+        fontWeight: '700',
+        letterSpacing: 1.5,
+        textTransform: 'uppercase',
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
 function EnrollmentRow({ label, enrolled }: { label: string; enrolled: boolean }) {
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   return (
     <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-      <Text color="$color10">{label}</Text>
-      <Text color={enrolled ? '$green10' : '$color10'} fontWeight="600">
+      <Text style={{ color: palette.inkSoft }}>{label}</Text>
+      <Text
+        color={enrolled ? '$green10' : undefined}
+        style={enrolled ? undefined : { color: palette.inkSoft }}
+        fontWeight="600"
+      >
         {enrolled ? 'Enrolled' : 'Not enrolled'}
       </Text>
     </XStack>
@@ -59,10 +87,12 @@ function EnrollmentRow({ label, enrolled }: { label: string; enrolled: boolean }
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   return (
     <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-      <Text color="$color10">{label}</Text>
-      <Text color="$color">{value}</Text>
+      <Text style={{ color: palette.inkSoft }}>{label}</Text>
+      <Text style={{ color: palette.ink }}>{value}</Text>
     </XStack>
   );
 }
@@ -84,11 +114,13 @@ function VerificationAttemptRow({
   timestamp: string;
 }) {
   const isSuccess = outcome === 'SUCCESS';
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   return (
     <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
       <YStack>
-        <Text color="$color">{METHOD_LABELS[method]}</Text>
-        <Text color="$color10" fontSize="$2">
+        <Text style={{ color: palette.ink }}>{METHOD_LABELS[method]}</Text>
+        <Text style={{ color: palette.inkSoft }} fontSize="$2">
           {formatAttemptTimestamp(timestamp)}
           {matchScore != null ? ` — score ${matchScore.toFixed(2)}` : ''}
         </Text>
@@ -113,6 +145,8 @@ function DeleteAccountConfirmation({
 }) {
   const [confirmText, setConfirmText] = useState('');
   const canConfirm = confirmText === DELETE_CONFIRMATION_PHRASE;
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
 
   return (
     <YStack gap="$2">
@@ -120,7 +154,9 @@ function DeleteAccountConfirmation({
         variant="error"
         message="This permanently deletes your account and all attendance, enrollment, and verification data. This cannot be undone."
       />
-      <Text color="$color10">Type {DELETE_CONFIRMATION_PHRASE} below to confirm.</Text>
+      <Text style={{ color: palette.inkSoft }}>
+        Type {DELETE_CONFIRMATION_PHRASE} below to confirm.
+      </Text>
       <Input
         value={confirmText}
         onChangeText={setConfirmText}
@@ -150,6 +186,7 @@ function DeleteAccountConfirmation({
 
 export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const { resolvedTheme, setPreference } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   const { data, isLoading, isError, error, refetch, isRefetching } = useMeQuery();
   const {
     data: attemptsData,
@@ -211,7 +248,7 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
       {isLoading ? (
         <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Spinner />
-          <Text color="$color10">Loading your profile...</Text>
+          <Text style={{ color: palette.inkSoft }}>Loading your profile...</Text>
         </YStack>
       ) : null}
 
@@ -236,14 +273,8 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
 
       {profile ? (
         <YStack gap="$4">
-          <YStack
-            gap="$2"
-            borderWidth={1}
-            borderColor="$borderColor"
-            p="$3"
-            style={{ borderRadius: 8 }}
-          >
-            <H3>Account</H3>
+          <GlassCard>
+            <SectionHeading>Account</SectionHeading>
             <InfoRow label="Name" value={profile.fullName ?? '—'} />
             <InfoRow label="Email" value={profile.email ?? '—'} />
             {profile.age != null ? <InfoRow label="Age" value={String(profile.age)} /> : null}
@@ -252,16 +283,10 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
             {profile.createdAt ? (
               <InfoRow label="Member since" value={formatMemberSince(profile.createdAt)} />
             ) : null}
-          </YStack>
+          </GlassCard>
 
-          <YStack
-            gap="$2"
-            borderWidth={1}
-            borderColor="$borderColor"
-            p="$3"
-            style={{ borderRadius: 8 }}
-          >
-            <H3>Enrollment status</H3>
+          <GlassCard>
+            <SectionHeading>Enrollment status</SectionHeading>
             <EnrollmentRow
               label="Face"
               enrolled={profile.enrollmentStatus?.faceEnrolled ?? false}
@@ -286,20 +311,14 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 </Button>
               ) : null}
             </XStack>
-          </YStack>
+          </GlassCard>
 
-          <YStack
-            gap="$2"
-            borderWidth={1}
-            borderColor="$borderColor"
-            p="$3"
-            style={{ borderRadius: 8 }}
-          >
-            <H3>Verification activity</H3>
+          <GlassCard>
+            <SectionHeading>Verification activity</SectionHeading>
             {isAttemptsLoading ? (
               <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Spinner />
-                <Text color="$color10">Loading activity...</Text>
+                <Text style={{ color: palette.inkSoft }}>Loading activity...</Text>
               </YStack>
             ) : null}
             {isAttemptsError ? (
@@ -326,46 +345,50 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 />
               ) : null,
             )}
-          </YStack>
+          </GlassCard>
 
-          <YStack
-            gap="$2"
-            borderWidth={1}
-            borderColor="$borderColor"
-            p="$3"
-            style={{ borderRadius: 8 }}
-          >
-            <H3>Appearance</H3>
+          <GlassCard>
+            <SectionHeading>Appearance</SectionHeading>
             <XStack gap="$2">
               <Button
                 flex={1}
                 size="$3"
-                background={resolvedTheme === 'light' ? '$color' : '$background'}
-                color={resolvedTheme === 'light' ? '$background' : '$color'}
+                style={{
+                  backgroundColor: resolvedTheme === 'light' ? palette.accent : undefined,
+                }}
                 onPress={() => setPreference('light')}
               >
-                Light
+                <Text
+                  style={{
+                    color: resolvedTheme === 'light' ? palette.accentInk : palette.inkSoft,
+                    fontWeight: '700',
+                  }}
+                >
+                  Light
+                </Text>
               </Button>
               <Button
                 flex={1}
                 size="$3"
-                background={resolvedTheme === 'dark' ? '$color' : '$background'}
-                color={resolvedTheme === 'dark' ? '$background' : '$color'}
+                style={{
+                  backgroundColor: resolvedTheme === 'dark' ? palette.accent : undefined,
+                }}
                 onPress={() => setPreference('dark')}
               >
-                Dark
+                <Text
+                  style={{
+                    color: resolvedTheme === 'dark' ? palette.accentInk : palette.inkSoft,
+                    fontWeight: '700',
+                  }}
+                >
+                  Dark
+                </Text>
               </Button>
             </XStack>
-          </YStack>
+          </GlassCard>
 
-          <YStack
-            gap="$2"
-            borderWidth={1}
-            borderColor="$borderColor"
-            p="$3"
-            style={{ borderRadius: 8 }}
-          >
-            <H3>Data controls</H3>
+          <GlassCard>
+            <SectionHeading>Data controls</SectionHeading>
             {downloadError ? <FeedbackBanner variant="error" message={downloadError} /> : null}
             <Button
               onPress={handleDownloadData}
@@ -387,7 +410,7 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 Delete my account
               </Button>
             )}
-          </YStack>
+          </GlassCard>
         </YStack>
       ) : null}
 
