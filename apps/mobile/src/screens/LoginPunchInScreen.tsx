@@ -35,14 +35,18 @@
  * never both, and only after repeated failures, so a single ordinary retry
  * isn't treated as if something's badly wrong.
  */
+import { ACCOUNT_NOT_FOUND_MESSAGE } from '@attendance-app/shared-types';
 import * as LocalAuthentication from 'expo-local-authentication';
 import type { ComponentRef } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, H1, Input, Spinner, Text, YStack } from 'tamagui';
+import { Button, H1, Spinner, Text, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { GlassCard } from '../components/GlassCard';
+import { IconInput } from '../components/IconInput';
 import { LivenessChallengeOverlay } from '../components/LivenessChallengeOverlay';
+import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import {
   useIdentifyQuery,
   usePunchInFaceMutation,
@@ -58,6 +62,7 @@ import { useLivenessChallenge } from '../platform/livenessSignals';
 import { setAuthToken } from '../services/graphqlClient';
 import { getErrorMessage } from '../services/graphqlError';
 import { saveToken } from '../services/tokenStorage';
+import { GLASS_PALETTES } from '../theme/glassPalette';
 import { getFingerprintAuthErrorMessage } from '../utils/fingerprintAuthErrors';
 import { getBestEffortLocation } from '../utils/geolocation';
 import { isValidEmail } from '../utils/validation';
@@ -81,6 +86,8 @@ const EMPTY_FACE_INFO: LiveFaceInfo = {
 
 export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
   const insets = useSafeAreaInsets();
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   const [email, setEmail] = useState('');
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -114,6 +121,11 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
   } = useIdentifyQuery({ email: submittedEmail ?? '' }, { enabled: submittedEmail !== null });
 
   const identify = identifyData?.identify;
+  /** Registration isn't done until Step 3 (`registrationStep === 3`) — an
+   * account mid-wizard shouldn't be offered "Verify Face"/"Verify
+   * Fingerprint" alongside "Continue Registration" at the same time (a
+   * confusing multi-button state); only one CTA makes sense at once. */
+  const isRegistrationComplete = (identify?.registrationStep ?? 3) >= 3;
 
   const {
     mutate: punchInFingerprint,
@@ -191,6 +203,22 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
     } finally {
       setIsVerifying(false);
     }
+  }
+
+  /** Sends an account with an unfinished registration wizard (`registrationStep`
+   * < 3) back into it at the right step — without this, an account that
+   * dropped off after Step 1/2 has no way back in, and that email is
+   * permanently stuck (registerStep1 rejects re-registering an existing
+   * email, ADR-004). */
+  function handleContinueRegistration() {
+    if (!identify?.userId) {
+      return;
+    }
+    if ((identify.registrationStep ?? 3) <= 1) {
+      navigation.navigate('RegisterStep2', { userId: identify.userId });
+      return;
+    }
+    navigation.navigate('RegisterStep3', { userId: identify.userId });
   }
 
   /** Resets challenge state to try again, without touching the failure count. */
@@ -322,135 +350,236 @@ export function LoginPunchInScreen({ navigation }: RootScreenProps<'Login'>) {
 
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-      <YStack flex={1} gap="$4" p="$4" background="$background">
-        <H1>Attendance</H1>
-        <Text color="$color10">
-          Enter your email, then verify your face or fingerprint — that verification is your
-          check-in or check-out. No password, ever.
-        </Text>
+      <YStack
+        flex={1}
+        style={{ justifyContent: 'center', alignItems: 'center' }}
+        px="$2"
+        py="$4"
+        pb={insets.bottom + 16}
+      >
+        <YStack width="100%" style={{ maxWidth: 440 }}>
+          <GlassCard p="$6" gap="$4">
+            <H1 style={{ textAlign: 'center', color: palette.ink }} mb="$2">
+              Attendence App
+            </H1>
+            <Text style={{ textAlign: 'center', color: palette.inkSoft }} mb="$4">
+              Enter your email, then verify your face or fingerprint — that verification is your
+              check-in or check-out. No password, ever.
+            </Text>
 
-        {submittedEmail === null ? (
-          <>
-            <Input
-              value={email}
-              onChangeText={(text) => {
-                setEmail(text);
-                setEmailError(null);
-              }}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholder="you@example.com"
-              returnKeyType="go"
-              onSubmitEditing={handleContinue}
-            />
-            {emailError ? <FeedbackBanner variant="error" message={emailError} /> : null}
-            <Button onPress={handleContinue}>Continue</Button>
-          </>
-        ) : (
-          <>
-            {isIdentifying ? (
-              <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Spinner />
-                <Text color="$color10">Looking up your account...</Text>
-              </YStack>
-            ) : null}
-
-            {isIdentifyError ? (
-              <FeedbackBanner variant="error" message={getErrorMessage(identifyError)} />
-            ) : null}
-
-            {identify ? (
+            {submittedEmail === null ? (
               <>
-                <FeedbackBanner variant="success" message={`Welcome back, ${identify.fullName}.`} />
-
-                {!identify.fingerprintEnrolled && !identify.faceEnrolled ? (
-                  <FeedbackBanner
-                    variant="info"
-                    message="No biometric method is set up for this account yet. Finish registration to enable check-in."
-                  />
-                ) : null}
-
-                {FINGERPRINT_SUPPORTED &&
-                identify.fingerprintEnrolled &&
-                hardwareStatus === 'no-hardware' ? (
-                  <FeedbackBanner
-                    variant="error"
-                    message="This device has no biometric hardware. Fingerprint check-in isn't available here."
-                  />
-                ) : null}
-
-                {FINGERPRINT_SUPPORTED &&
-                identify.fingerprintEnrolled &&
-                hardwareStatus === 'not-enrolled' ? (
-                  <FeedbackBanner
-                    variant="error"
-                    message="No fingerprint is enrolled on this device. Enroll one in Settings, then retry."
-                  />
-                ) : null}
-
-                {authError ? <FeedbackBanner variant="error" message={authError} /> : null}
-                {isFingerprintPunchError ? (
-                  <FeedbackBanner
-                    variant="error"
-                    message={getErrorMessage(fingerprintPunchError)}
-                  />
-                ) : null}
-
-                {identify.faceEnrolled && isFaceCameraActive ? (
-                  <FaceVerificationCamera
-                    cameraRef={cameraRef}
-                    hasCameraPermission={hasCameraPermission}
-                    requestCameraPermission={requestCameraPermission}
-                    hasDevice={hasDevice}
-                    onFrame={handleFrame}
-                    onCameraError={(err) =>
-                      handleFaceFailure(getErrorMessage(err, 'Camera error.'))
-                    }
-                    liveness={liveness}
-                    isFaceTimedOut={isFaceTimedOut}
-                    isProcessingFace={isProcessingFace || isPunchingInFace}
-                    faceError={faceError}
-                    isFacePunchError={isFacePunchError}
-                    facePunchErrorMessage={
-                      isFacePunchError ? getErrorMessage(facePunchError) : null
-                    }
-                    showFallbackGuidance={faceFailureCount >= FACE_FALLBACK_THRESHOLD}
-                    canSwitchToFingerprint={
-                      FINGERPRINT_SUPPORTED &&
-                      Boolean(identify.fingerprintEnrolled) &&
-                      hardwareStatus === 'ready'
-                    }
-                    onRetry={handleRetryAfterTimeout}
-                    onCancel={handleCancelFaceVerification}
-                    onSwitchToFingerprint={handleSwitchToFingerprint}
-                  />
-                ) : null}
-
-                {identify.faceEnrolled && !isFaceCameraActive ? (
-                  <Button onPress={handleStartFaceVerification}>Verify Face</Button>
-                ) : null}
-
-                {FINGERPRINT_SUPPORTED &&
-                identify.fingerprintEnrolled &&
-                hardwareStatus === 'ready' &&
-                !isFaceCameraActive ? (
-                  <Button
-                    onPress={handleVerifyFingerprint}
-                    disabled={isVerifying || isPunchingInFingerprint}
-                    {...(isVerifying || isPunchingInFingerprint ? { icon: <Spinner /> } : {})}
+                <IconInput
+                  icon="mail-outline"
+                  size="$4"
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    setEmailError(null);
+                  }}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  placeholder="you@example.com"
+                  returnKeyType="go"
+                  onSubmitEditing={handleContinue}
+                />
+                {emailError ? <FeedbackBanner variant="error" message={emailError} /> : null}
+                <Button
+                  size="$4"
+                  onPress={handleContinue}
+                  disabled={isIdentifying}
+                  style={{ backgroundColor: palette.accent }}
+                >
+                  <Text style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}>
+                    {isIdentifying ? 'LOOKING UP...' : 'CONTINUE'}
+                  </Text>
+                </Button>
+              </>
+            ) : (
+              <>
+                {isIdentifying ? (
+                  <YStack
+                    gap="$2"
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
                   >
-                    {isPunchingInFingerprint ? 'Recording punch...' : 'Verify Fingerprint'}
+                    <Spinner />
+                    <Text style={{ color: palette.inkSoft }}>Looking up your account...</Text>
+                  </YStack>
+                ) : null}
+
+                {isIdentifyError ? (
+                  <>
+                    <FeedbackBanner variant="error" message={getErrorMessage(identifyError)} />
+                    {getErrorMessage(identifyError) === ACCOUNT_NOT_FOUND_MESSAGE ? (
+                      <Button
+                        size="$4"
+                        onPress={() => navigation.navigate('RegisterStep1')}
+                        style={{ backgroundColor: palette.accent }}
+                      >
+                        <Text
+                          style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}
+                        >
+                          REGISTER
+                        </Text>
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {identify ? (
+                  <>
+                    <FeedbackBanner
+                      variant="success"
+                      message={`Welcome back, ${identify.fullName}.`}
+                    />
+
+                    {(identify.registrationStep ?? 3) < 3 ? (
+                      <>
+                        <FeedbackBanner
+                          variant="info"
+                          message="Registration isn't finished yet — continue where you left off to enable check-in."
+                        />
+                        <Button
+                          size="$4"
+                          onPress={handleContinueRegistration}
+                          style={{ backgroundColor: palette.accent }}
+                        >
+                          <Text
+                            style={{
+                              color: palette.accentInk,
+                              fontWeight: '700',
+                              letterSpacing: 1,
+                            }}
+                          >
+                            CONTINUE REGISTRATION
+                          </Text>
+                        </Button>
+                      </>
+                    ) : null}
+
+                    {isRegistrationComplete ? (
+                      <>
+                        {FINGERPRINT_SUPPORTED &&
+                        identify.fingerprintEnrolled &&
+                        hardwareStatus === 'no-hardware' ? (
+                          <FeedbackBanner
+                            variant="error"
+                            message="This device has no biometric hardware. Fingerprint check-in isn't available here."
+                          />
+                        ) : null}
+
+                        {FINGERPRINT_SUPPORTED &&
+                        identify.fingerprintEnrolled &&
+                        hardwareStatus === 'not-enrolled' ? (
+                          <FeedbackBanner
+                            variant="error"
+                            message="No fingerprint is enrolled on this device. Enroll one in Settings, then retry."
+                          />
+                        ) : null}
+
+                        {authError ? <FeedbackBanner variant="error" message={authError} /> : null}
+                        {isFingerprintPunchError ? (
+                          <FeedbackBanner
+                            variant="error"
+                            message={getErrorMessage(fingerprintPunchError)}
+                          />
+                        ) : null}
+
+                        {identify.faceEnrolled && isFaceCameraActive ? (
+                          <FaceVerificationCamera
+                            cameraRef={cameraRef}
+                            hasCameraPermission={hasCameraPermission}
+                            requestCameraPermission={requestCameraPermission}
+                            hasDevice={hasDevice}
+                            onFrame={handleFrame}
+                            onCameraError={(err) =>
+                              handleFaceFailure(getErrorMessage(err, 'Camera error.'))
+                            }
+                            liveness={liveness}
+                            isFaceTimedOut={isFaceTimedOut}
+                            isProcessingFace={isProcessingFace || isPunchingInFace}
+                            faceError={faceError}
+                            isFacePunchError={isFacePunchError}
+                            facePunchErrorMessage={
+                              isFacePunchError ? getErrorMessage(facePunchError) : null
+                            }
+                            showFallbackGuidance={faceFailureCount >= FACE_FALLBACK_THRESHOLD}
+                            canSwitchToFingerprint={
+                              FINGERPRINT_SUPPORTED &&
+                              Boolean(identify.fingerprintEnrolled) &&
+                              hardwareStatus === 'ready'
+                            }
+                            onRetry={handleRetryAfterTimeout}
+                            onCancel={handleCancelFaceVerification}
+                            onSwitchToFingerprint={handleSwitchToFingerprint}
+                          />
+                        ) : null}
+
+                        {identify.faceEnrolled && !isFaceCameraActive ? (
+                          <Button
+                            onPress={handleStartFaceVerification}
+                            size="$4"
+                            style={{ backgroundColor: palette.accent }}
+                          >
+                            <Text
+                              style={{
+                                color: palette.accentInk,
+                                fontWeight: '700',
+                                letterSpacing: 1,
+                              }}
+                            >
+                              VERIFY FACE
+                            </Text>
+                          </Button>
+                        ) : null}
+
+                        {FINGERPRINT_SUPPORTED &&
+                        identify.fingerprintEnrolled &&
+                        hardwareStatus === 'ready' &&
+                        !isFaceCameraActive ? (
+                          <Button
+                            onPress={handleVerifyFingerprint}
+                            disabled={isVerifying || isPunchingInFingerprint}
+                            size="$4"
+                            style={{ backgroundColor: palette.accent }}
+                            {...(isVerifying || isPunchingInFingerprint
+                              ? { icon: <Spinner /> }
+                              : {})}
+                          >
+                            <Text
+                              style={{
+                                color: palette.accentInk,
+                                fontWeight: '700',
+                                letterSpacing: 1,
+                              }}
+                            >
+                              {isPunchingInFingerprint
+                                ? 'RECORDING PUNCH...'
+                                : 'VERIFY FINGERPRINT'}
+                            </Text>
+                          </Button>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {!isFaceCameraActive ? (
+                  <Button
+                    onPress={handleUseDifferentEmail}
+                    disabled={isIdentifying}
+                    variant="outlined"
+                    size="$4"
+                  >
+                    <Text style={{ color: palette.ink, letterSpacing: 1 }}>
+                      USE A DIFFERENT EMAIL
+                    </Text>
                   </Button>
                 ) : null}
               </>
-            ) : null}
-
-            {!isFaceCameraActive ? (
-              <Button onPress={handleUseDifferentEmail}>Use a different email</Button>
-            ) : null}
-          </>
-        )}
-        <YStack style={{ height: insets.bottom }} />
+            )}
+          </GlassCard>
+        </YStack>
       </YStack>
     </ScrollView>
   );
@@ -503,10 +632,13 @@ function FaceVerificationCamera({
   onCancel,
   onSwitchToFingerprint,
 }: FaceVerificationCameraProps) {
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
+
   if (!hasCameraPermission) {
     return (
       <YStack gap="$2">
-        <Text color="$color10">We need camera access to verify your face.</Text>
+        <Text style={{ color: palette.inkSoft }}>We need camera access to verify your face.</Text>
         <Button onPress={requestCameraPermission}>Grant Camera Access</Button>
         <Button onPress={onCancel}>Cancel</Button>
       </YStack>
@@ -519,7 +651,15 @@ function FaceVerificationCamera({
 
   return (
     <YStack gap="$2">
-      <YStack style={{ height: 320, overflow: 'hidden', borderRadius: 8 }}>
+      <YStack
+        style={{
+          height: 320,
+          overflow: 'hidden',
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: palette.glassBorder,
+        }}
+      >
         <FaceCameraView ref={cameraRef} onFrame={onFrame} onError={onCameraError} />
       </YStack>
 
@@ -528,7 +668,7 @@ function FaceVerificationCamera({
       {isProcessingFace ? (
         <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Spinner />
-          <Text color="$color10">Verifying...</Text>
+          <Text style={{ color: palette.inkSoft }}>Verifying...</Text>
         </YStack>
       ) : null}
 

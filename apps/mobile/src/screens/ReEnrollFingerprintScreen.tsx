@@ -6,29 +6,25 @@
  * here — this screen simply never renders on a platform without fingerprint
  * support.
  */
-import { ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { H1, Text, YStack } from 'tamagui';
+
 import { FingerprintConfirmationPanel } from '../components/FingerprintConfirmationPanel';
+import { GlassCard } from '../components/GlassCard';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { useReEnrollFingerprintMutation } from '../generated/graphql';
 import type { RootScreenProps } from '../navigation/types';
 import { getErrorMessage } from '../services/graphqlError';
 
 export function ReEnrollFingerprintScreen({ navigation }: RootScreenProps<'ReEnrollFingerprint'>) {
-  const insets = useSafeAreaInsets();
-
   const { mutate, isPending, error, isError } = useReEnrollFingerprintMutation({
     onSuccess: () => navigation.navigate('Profile'),
   });
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-      <YStack flex={1} gap="$4" p="$4" background="$background">
-        <H1>Re-enroll Fingerprint</H1>
-        <Text color="$color10">
-          Confirm your fingerprint again to replace your current enrollment — useful after a
-          hardware change or if check-ins have started failing.
-        </Text>
+    <ScreenContainer
+      title="Re-enroll Fingerprint"
+      description="Confirm your fingerprint again to replace your current enrollment — useful after a hardware change or if check-ins have started failing."
+    >
+      <GlassCard>
         <FingerprintConfirmationPanel
           promptMessage="Confirm your fingerprint to re-enroll"
           confirmLabel="Confirm Fingerprint"
@@ -36,8 +32,7 @@ export function ReEnrollFingerprintScreen({ navigation }: RootScreenProps<'ReEnr
           isSubmitting={isPending}
           submitError={isError ? getErrorMessage(error) : null}
         />
-        <YStack style={{ height: insets.bottom }} />
-      </YStack>
-    </ScrollView>
+      </GlassCard>
+    </ScreenContainer>
   );
 }

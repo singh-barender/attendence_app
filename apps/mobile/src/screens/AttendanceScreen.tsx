@@ -7,22 +7,25 @@
  * "punch in first" message instead of a raw GraphQL error.
  */
 import { useState } from 'react';
-import { ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, H1, Spinner, Text, XStack, YStack } from 'tamagui';
+import { Button, Spinner, Text, XStack, YStack } from 'tamagui';
 import { AttendanceCalendar } from '../components/AttendanceCalendar';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { GlassCard } from '../components/GlassCard';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { StatusBadge } from '../components/StatusBadge';
+import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import { useAttendanceHistoryQuery } from '../generated/graphql';
 import type { RootScreenProps } from '../navigation/types';
 import { exportAttendanceCsv } from '../platform/csvExport';
 import { getErrorMessage } from '../services/graphqlError';
+import { GLASS_PALETTES } from '../theme/glassPalette';
 import { formatDisplayDate, formatHoursWorked, formatPunchTime } from '../utils/formatDateTime';
 
 type ViewMode = 'list' | 'calendar';
 
 export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) {
-  const insets = useSafeAreaInsets();
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
   const { data, isLoading, isError, error, refetch, isRefetching } = useAttendanceHistoryQuery();
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -45,112 +48,112 @@ export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) 
   }
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-      <YStack flex={1} gap="$4" p="$4" background="$background">
-        <H1>Attendance</H1>
-        <Text color="$color10">Your check-in and check-out history.</Text>
+    <ScreenContainer title="Attendence App" description="Your check-in and check-out history.">
+      {!isUnauthorized && days.length > 0 ? (
+        <Button
+          onPress={handleExport}
+          disabled={isExporting}
+          {...(isExporting ? { icon: <Spinner /> } : {})}
+        >
+          {isExporting ? 'Exporting...' : 'Export CSV'}
+        </Button>
+      ) : null}
+      {exportError ? <FeedbackBanner variant="error" message={exportError} /> : null}
 
-        {!isUnauthorized && days.length > 0 ? (
-          <Button
-            onPress={handleExport}
-            disabled={isExporting}
-            {...(isExporting ? { icon: <Spinner /> } : {})}
-          >
-            {isExporting ? 'Exporting...' : 'Export CSV'}
+      {isLoading ? (
+        <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Spinner />
+          <Text style={{ color: palette.inkSoft }}>Loading your history...</Text>
+        </YStack>
+      ) : null}
+
+      {isUnauthorized ? (
+        <YStack gap="$2">
+          <FeedbackBanner
+            variant="info"
+            message="Verify your fingerprint to check in first — your history will show up here afterward."
+          />
+          <Button onPress={() => navigation.navigate('Login')}>Go to check-in</Button>
+        </YStack>
+      ) : null}
+
+      {isError && !isUnauthorized ? (
+        <YStack gap="$2">
+          <FeedbackBanner variant="error" message={errorMessage ?? 'Something went wrong.'} />
+          <Button onPress={() => refetch()} disabled={isRefetching}>
+            {isRefetching ? 'Retrying...' : 'Retry'}
           </Button>
-        ) : null}
-        {exportError ? <FeedbackBanner variant="error" message={exportError} /> : null}
+        </YStack>
+      ) : null}
 
-        {isLoading ? (
-          <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Spinner />
-            <Text color="$color10">Loading your history...</Text>
-          </YStack>
-        ) : null}
+      {!isLoading && !isError && days.length === 0 ? (
+        <FeedbackBanner variant="info" message="No attendance recorded yet." />
+      ) : null}
 
-        {isUnauthorized ? (
-          <YStack gap="$2">
-            <FeedbackBanner
-              variant="info"
-              message="Verify your fingerprint to check in first — your history will show up here afterward."
-            />
-            <Button onPress={() => navigation.navigate('Login')}>Go to check-in</Button>
-          </YStack>
-        ) : null}
-
-        {isError && !isUnauthorized ? (
-          <YStack gap="$2">
-            <FeedbackBanner variant="error" message={errorMessage ?? 'Something went wrong.'} />
-            <Button onPress={() => refetch()} disabled={isRefetching}>
-              {isRefetching ? 'Retrying...' : 'Retry'}
-            </Button>
-          </YStack>
-        ) : null}
-
-        {!isLoading && !isError && days.length === 0 ? (
-          <FeedbackBanner variant="info" message="No attendance recorded yet." />
-        ) : null}
-
-        {!isUnauthorized && !isError && days.length > 0 ? (
-          <XStack gap="$2">
-            <Button
-              flex={1}
-              size="$3"
-              background={viewMode === 'list' ? '$color' : '$background'}
-              color={viewMode === 'list' ? '$background' : '$color'}
-              onPress={() => setViewMode('list')}
+      {!isUnauthorized && !isError && days.length > 0 ? (
+        <XStack gap="$2">
+          <Button
+            flex={1}
+            size="$3"
+            style={{ backgroundColor: viewMode === 'list' ? palette.accent : undefined }}
+            onPress={() => setViewMode('list')}
+          >
+            <Text
+              style={{
+                color: viewMode === 'list' ? palette.accentInk : palette.inkSoft,
+                fontWeight: '700',
+              }}
             >
               List
-            </Button>
-            <Button
-              flex={1}
-              size="$3"
-              background={viewMode === 'calendar' ? '$color' : '$background'}
-              color={viewMode === 'calendar' ? '$background' : '$color'}
-              onPress={() => setViewMode('calendar')}
+            </Text>
+          </Button>
+          <Button
+            flex={1}
+            size="$3"
+            style={{ backgroundColor: viewMode === 'calendar' ? palette.accent : undefined }}
+            onPress={() => setViewMode('calendar')}
+          >
+            <Text
+              style={{
+                color: viewMode === 'calendar' ? palette.accentInk : palette.inkSoft,
+                fontWeight: '700',
+              }}
             >
               Calendar
-            </Button>
-          </XStack>
-        ) : null}
+            </Text>
+          </Button>
+        </XStack>
+      ) : null}
 
-        {viewMode === 'calendar' && days.length > 0 ? <AttendanceCalendar days={days} /> : null}
+      {viewMode === 'calendar' && days.length > 0 ? <AttendanceCalendar days={days} /> : null}
 
-        {viewMode === 'list'
-          ? days.map((day) =>
-              day.date ? (
-                <YStack
-                  key={day.date}
-                  gap="$2"
-                  borderWidth={1}
-                  borderColor="$borderColor"
-                  p="$3"
-                  style={{ borderRadius: 8 }}
-                >
-                  <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text color="$color" fontWeight="600">
-                      {formatDisplayDate(day.date)}
-                    </Text>
-                    {day.status ? <StatusBadge status={day.status} /> : null}
-                  </XStack>
-                  <Text color="$color10">
-                    Check-in:{' '}
-                    {day.checkIn?.timestamp ? formatPunchTime(day.checkIn.timestamp) : '—'}
-                    {'   '}
-                    Check-out:{' '}
-                    {day.checkOut?.timestamp ? formatPunchTime(day.checkOut.timestamp) : '—'}
+      {viewMode === 'list'
+        ? days.map((day) =>
+            day.date ? (
+              <GlassCard key={day.date}>
+                <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ color: palette.ink, fontWeight: '600' }}>
+                    {formatDisplayDate(day.date)}
                   </Text>
-                  {day.hoursWorked != null ? (
-                    <Text color="$color10">Hours worked: {formatHoursWorked(day.hoursWorked)}</Text>
-                  ) : null}
-                </YStack>
-              ) : null,
-            )
-          : null}
+                  {day.status ? <StatusBadge status={day.status} /> : null}
+                </XStack>
+                <Text style={{ color: palette.inkSoft }}>
+                  Check-in: {day.checkIn?.timestamp ? formatPunchTime(day.checkIn.timestamp) : '—'}
+                  {'   '}
+                  Check-out:{' '}
+                  {day.checkOut?.timestamp ? formatPunchTime(day.checkOut.timestamp) : '—'}
+                </Text>
+                {day.hoursWorked != null ? (
+                  <Text style={{ color: palette.inkSoft }}>
+                    Hours worked: {formatHoursWorked(day.hoursWorked)}
+                  </Text>
+                ) : null}
+              </GlassCard>
+            ) : null,
+          )
+        : null}
 
-        <Button onPress={() => navigation.navigate('Profile')}>View profile</Button>
-        <YStack style={{ height: insets.bottom }} />
-      </YStack>
-    </ScrollView>
+      <Button onPress={() => navigation.navigate('Profile')}>View profile</Button>
+    </ScreenContainer>
   );
 }

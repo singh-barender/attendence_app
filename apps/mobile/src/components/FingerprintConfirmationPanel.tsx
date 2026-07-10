@@ -11,9 +11,12 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useState } from 'react';
 import { Button, Spinner, Text, YStack } from 'tamagui';
+import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import { useFingerprintHardwareStatus } from '../hooks/useFingerprintHardwareStatus';
+import { GLASS_PALETTES } from '../theme/glassPalette';
 import { getFingerprintAuthErrorMessage } from '../utils/fingerprintAuthErrors';
 import { FeedbackBanner } from './FeedbackBanner';
+import { FingerprintScanHint } from './FingerprintScanHint';
 
 interface FingerprintConfirmationPanelProps {
   promptMessage: string;
@@ -32,6 +35,8 @@ export function FingerprintConfirmationPanel({
 }: FingerprintConfirmationPanelProps) {
   const { status: hardwareStatus, retry: checkHardware } = useFingerprintHardwareStatus();
   const [authError, setAuthError] = useState<string | null>(null);
+  const { resolvedTheme } = useThemePreference();
+  const palette = GLASS_PALETTES[resolvedTheme];
 
   async function handleConfirm() {
     setAuthError(null);
@@ -50,7 +55,7 @@ export function FingerprintConfirmationPanel({
       {hardwareStatus === 'checking' ? (
         <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Spinner />
-          <Text color="$color10">Checking device hardware...</Text>
+          <Text style={{ color: palette.inkSoft }}>Checking device hardware...</Text>
         </YStack>
       ) : null}
 
@@ -71,6 +76,8 @@ export function FingerprintConfirmationPanel({
         </YStack>
       ) : null}
 
+      {hardwareStatus === 'ready' ? <FingerprintScanHint /> : null}
+
       {hardwareStatus === 'ready' && !authError && !submitError ? (
         <FeedbackBanner variant="success" message="Fingerprint sensor ready to confirm." />
       ) : null}
@@ -82,9 +89,12 @@ export function FingerprintConfirmationPanel({
         <Button
           onPress={handleConfirm}
           disabled={isSubmitting}
+          style={{ backgroundColor: palette.accent }}
           {...(isSubmitting ? { icon: <Spinner /> } : {})}
         >
-          {isSubmitting ? 'Confirming...' : confirmLabel}
+          <Text style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}>
+            {(isSubmitting ? 'Confirming...' : confirmLabel).toUpperCase()}
+          </Text>
         </Button>
       ) : null}
     </YStack>
