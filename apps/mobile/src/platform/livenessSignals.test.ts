@@ -7,12 +7,16 @@ import {
 
 const NO_FACE: LiveFaceInfo = {
   hasFace: false,
+  faceCount: 0,
   bounds: null,
   frameWidth: 0,
   frameHeight: 0,
   yawAngle: null,
   leftEyeOpen: null,
   rightEyeOpen: null,
+  smileProbability: null,
+  pitchAngle: null,
+  isOccluded: false,
 };
 
 /** Builds a LiveFaceInfo fixture, overriding only the fields a test cares about. */
@@ -23,12 +27,23 @@ function face(overrides: Partial<LiveFaceInfo>): LiveFaceInfo {
 describe('faceToLivenessSample', () => {
   it('extracts eye-openness and yaw from a detected face', () => {
     expect(
-      faceToLivenessSample(face({ leftEyeOpen: 0.9, rightEyeOpen: 0.8, yawAngle: 12.5 }), 1000),
+      faceToLivenessSample(
+        face({
+          leftEyeOpen: 0.9,
+          rightEyeOpen: 0.8,
+          yawAngle: 12.5,
+          smileProbability: 0.4,
+          pitchAngle: -3,
+        }),
+        1000,
+      ),
     ).toEqual({
       timestampMs: 1000,
       leftEyeOpenProbability: 0.9,
       rightEyeOpenProbability: 0.8,
       yawAngleDegrees: 12.5,
+      smileProbability: 0.4,
+      pitchAngleDegrees: -3,
     });
   });
 
@@ -38,6 +53,8 @@ describe('faceToLivenessSample', () => {
       leftEyeOpenProbability: null,
       rightEyeOpenProbability: null,
       yawAngleDegrees: null,
+      smileProbability: null,
+      pitchAngleDegrees: null,
     });
   });
 

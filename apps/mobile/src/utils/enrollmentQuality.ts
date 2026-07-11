@@ -18,6 +18,10 @@ export interface FaceBounds {
 export interface EnrollmentQualitySample {
   /** Whether ML Kit reported any face at all in the live frame at capture time. */
   readonly hasFace: boolean;
+  /** Number of faces the detector reported this frame — a capture is rejected
+   * when it's >1 so a second person can never be present at punch/enroll time.
+   * Optional so existing callers/fixtures default to "not multiple". */
+  readonly faceCount?: number;
   readonly faceBounds: FaceBounds | null;
   readonly frameWidth: number;
   readonly frameHeight: number;
@@ -29,15 +33,21 @@ export interface EnrollmentQualitySample {
    * flat/blurry image with little high-frequency content.
    */
   readonly sharpnessScore: number;
+  readonly leftEyeOpen?: number | null;
+  readonly rightEyeOpen?: number | null;
+  readonly isOccluded?: boolean;
 }
 
 export type EnrollmentQualityRejectionReason =
   | 'no-face'
+  | 'multiple-faces'
   | 'too-dark'
   | 'too-bright'
   | 'too-blurry'
   | 'too-small'
-  | 'off-center';
+  | 'off-center'
+  | 'eyes-closed'
+  | 'occluded';
 
 export interface EnrollmentQualityResult {
   readonly accepted: boolean;
@@ -58,11 +68,15 @@ export const MAX_CENTER_OFFSET_RATIO = 0.2;
 
 const REJECTION_MESSAGES: Record<EnrollmentQualityRejectionReason, string> = {
   'no-face': 'We couldn’t see your face — make sure it’s clearly visible and try again.',
+  'multiple-faces': 'More than one face is in view — make sure only you are in the frame.',
   'too-dark': 'It’s too dark for a good capture — move somewhere brighter and try again.',
   'too-bright': 'That’s too bright and washed out — move out of direct light and try again.',
   'too-blurry': 'That shot came out blurry — hold still and try again.',
   'too-small': 'Move a little closer so your face fills more of the frame.',
-  'off-center': 'Center your face in the frame and try again.',
+  'off-center': 'Please keep your face inside the frame and look directly at the camera.',
+  'eyes-closed':
+    'Your eyes appear to be closed — make sure your eyes are open and clearly visible.',
+  occluded: 'Something is covering your face. Please ensure your face is clearly visible.',
 };
 
 function reject(reason: EnrollmentQualityRejectionReason): EnrollmentQualityResult {
@@ -79,6 +93,12 @@ export function assessEnrollmentQuality(sample: EnrollmentQualitySample): Enroll
   if (!sample.hasFace || !sample.faceBounds) {
     return reject('no-face');
   }
+  if (sample.faceCount != null && sample.faceCount > 1) {
+    return reject('multiple-faces');
+  }
+  if (sample.isOccluded) {
+    return reject('occluded');
+  }
   if (sample.averageBrightness < MIN_BRIGHTNESS) {
     return reject('too-dark');
   }
@@ -87,6 +107,14 @@ export function assessEnrollmentQuality(sample: EnrollmentQualitySample): Enroll
   }
   if (sample.sharpnessScore < MIN_SHARPNESS_SCORE) {
     return reject('too-blurry');
+  }
+
+  const eyeThreshold = 0.4;
+  if (
+    (sample.leftEyeOpen != null && sample.leftEyeOpen < eyeThreshold) ||
+    (sample.rightEyeOpen != null && sample.rightEyeOpen < eyeThreshold)
+  ) {
+    return reject('eyes-closed');
   }
 
   const shorterFrameSide = Math.min(sample.frameWidth, sample.frameHeight);

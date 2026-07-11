@@ -83,6 +83,9 @@ export interface RecordPunchInput {
   matchScore?: number | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** Client-resolved place name for this punch's coordinates (cosmetic
+   * metadata — see the `address` column comment in schema.prisma). */
+  address?: string | null;
 }
 
 export interface RecordPunchResult {
@@ -111,6 +114,7 @@ export async function recordPunch(input: RecordPunchInput): Promise<RecordPunchR
         matchScore: input.matchScore ?? null,
         latitude: input.latitude ?? null,
         longitude: input.longitude ?? null,
+        address: input.address ?? null,
       },
     });
     return { record, type };

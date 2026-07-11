@@ -11,7 +11,23 @@
  * the active (`supersededAt: null`) set, so a superseded embedding can
  * never still match at punch-in.
  */
+import { cosineSimilarity } from '@attendance-app/face-matching';
 import { prisma } from '../db/client';
+
+/**
+ * Minimum cosine similarity between the frontal enrollment shot and each
+ * profile shot for the three to be accepted as the *same person* (anti-
+ * buddy-punching: you can't enroll a friend's face alongside your own).
+ *
+ * Deliberately LOOSE — three angles of one person are meant to differ, and a
+ * front-vs-profile pair of the same person can sit well below a verification
+ * threshold, so this only rejects a grossly different face, never legitimate
+ * angle variation (a tight value here would block real registrations). It's a
+ * sanity guard layered under the actual security boundary (the server's
+ * per-punch re-match, ADR-007), not a replacement for it. Tune upward only
+ * with real same-person/different-person enrollment data.
+ */
+export const MIN_ENROLLMENT_CONSISTENCY = 0.2;
 
 export const BIOMETRIC_ENROLLMENT_TYPE = {
   FACE_LEFT: 'FACE_LEFT',
@@ -52,6 +68,21 @@ function faceEnrollmentCreateData(userId: string, embeddings: FaceEmbeddingsInpu
   ];
 }
 
+/** Rejects a set of enrollment shots that don't plausibly belong to one
+ * person. Compares each profile against the frontal anchor (not left-vs-right,
+ * the most dissimilar pair) against the deliberately loose
+ * `MIN_ENROLLMENT_CONSISTENCY` bar. Throwing here is caught by the resolver
+ * and surfaced as a normal enrollment error. */
+export function assertEnrollmentConsistency(embeddings: FaceEmbeddingsInputShape): void {
+  const frontalToLeft = cosineSimilarity([...embeddings.frontal], [...embeddings.left]);
+  const frontalToRight = cosineSimilarity([...embeddings.frontal], [...embeddings.right]);
+  if (frontalToLeft < MIN_ENROLLMENT_CONSISTENCY || frontalToRight < MIN_ENROLLMENT_CONSISTENCY) {
+    throw new Error(
+      'Those enrollment photos don’t look like the same person — please retake all three yourself.',
+    );
+  }
+}
+
 export async function recordFingerprintConfirmation(userId: string): Promise<void> {
   await prisma.biometricEnrollment.create({
     data: { userId, type: BIOMETRIC_ENROLLMENT_TYPE.FINGERPRINT_FLAG },
@@ -62,6 +93,7 @@ export async function recordFaceEnrollment(
   userId: string,
   embeddings: FaceEmbeddingsInputShape,
 ): Promise<void> {
+  assertEnrollmentConsistency(embeddings);
   await prisma.biometricEnrollment.createMany({
     data: faceEnrollmentCreateData(userId, embeddings),
   });
@@ -91,6 +123,7 @@ export async function reEnrollFace(
   userId: string,
   embeddings: FaceEmbeddingsInputShape,
 ): Promise<void> {
+  assertEnrollmentConsistency(embeddings);
   await prisma.$transaction([
     prisma.biometricEnrollment.updateMany({
       where: { userId, type: { in: [...FACE_ENROLLMENT_TYPES] }, supersededAt: null },

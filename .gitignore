@@ -43,6 +43,8 @@ coverage/
 # Local SQLite databases (dev + test) — never committed (ADR-003)
 *.db
 *.db-journal
+# Local DB snapshots/backups (contain user data) — never committed
+*.db.backup*
 
 # OS
 .DS_Store

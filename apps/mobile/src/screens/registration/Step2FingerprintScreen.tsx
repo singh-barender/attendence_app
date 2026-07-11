@@ -23,10 +23,10 @@ import { GLASS_PALETTES } from '../../theme/glassPalette';
 export function Step2FingerprintScreen({ navigation, route }: RootScreenProps<'RegisterStep2'>) {
   const { resolvedTheme } = useThemePreference();
   const palette = GLASS_PALETTES[resolvedTheme];
-  const { userId } = route.params;
+  const { userId, email } = route.params;
 
   const { mutate, isPending, error, isError } = useRegisterStep2Mutation({
-    onSuccess: () => navigation.navigate('RegisterStep3', { userId }),
+    onSuccess: () => navigation.navigate('RegisterStep3', { userId, email }),
   });
 
   /** Fingerprint is Android-only (ADR-005) — web skips straight past this

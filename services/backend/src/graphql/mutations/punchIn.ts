@@ -16,14 +16,34 @@
  * The client's live embedding is trusted as *input* (a photo was captured
  * and locally embedded), but never as a *match decision*.
  */
-import { isMatch, MATCH_THRESHOLD } from '@attendance-app/face-matching';
+import { isMatch } from '@attendance-app/face-matching';
+import { config } from '../../config';
 import type { AttendanceRecord } from '../../generated/prisma/client';
 import * as attendanceService from '../../services/attendanceService';
 import * as enrollmentService from '../../services/enrollmentService';
 import { issueSessionToken } from '../../services/tokenService';
 import { builder } from '../builder';
+import type { GraphQLContext } from '../context';
 import { AttendanceRecordRef } from '../types/AttendanceRecord';
 import { PunchTypeEnum } from '../types/enums';
+
+/**
+ * Punches now require an authenticated session and may only be for the
+ * caller's *own* account (ADR-030): you log in with email+password first, then
+ * punch from the dashboard. This closes the attendance-fraud paths entirely —
+ * an unauthenticated request (no token) is rejected, and an authenticated one
+ * can't punch for a different `userId` (e.g. checking someone else out). The
+ * biometric verification the resolver runs after this is still the attendance
+ * event and its own security boundary (ADR-004/ADR-007), unchanged.
+ */
+function assertPunchIdentity(ctx: GraphQLContext, userId: string): void {
+  if (!ctx.userId) {
+    throw new Error('Log in before checking in or out.');
+  }
+  if (ctx.userId !== userId) {
+    throw new Error('This session can only punch for its own account. Log out first.');
+  }
+}
 
 export interface PunchInResultShape {
   token: string;
@@ -50,9 +70,11 @@ builder.mutationField('punchInFingerprint', (t) =>
       userId: t.arg.id({ required: true }),
       latitude: t.arg.float(),
       longitude: t.arg.float(),
+      address: t.arg.string(),
     },
-    resolve: async (_root, args): Promise<PunchInResultShape> => {
+    resolve: async (_root, args, ctx): Promise<PunchInResultShape> => {
       const userId = String(args.userId);
+      assertPunchIdentity(ctx, userId);
       const { fingerprintEnrolled } = await enrollmentService.getEnrollmentStatus(userId);
 
       if (!fingerprintEnrolled) {
@@ -75,6 +97,7 @@ builder.mutationField('punchInFingerprint', (t) =>
         method: attendanceService.VERIFICATION_METHOD.FINGERPRINT,
         latitude: args.latitude ?? null,
         longitude: args.longitude ?? null,
+        address: args.address ?? null,
       });
 
       const token = await issueSessionToken(userId);
@@ -92,9 +115,11 @@ builder.mutationField('punchInFace', (t) =>
       embedding: t.arg.floatList({ required: true }),
       latitude: t.arg.float(),
       longitude: t.arg.float(),
+      address: t.arg.string(),
     },
-    resolve: async (_root, args): Promise<PunchInResultShape> => {
+    resolve: async (_root, args, ctx): Promise<PunchInResultShape> => {
       const userId = String(args.userId);
+      assertPunchIdentity(ctx, userId);
       const enrolledEmbeddings = await enrollmentService.getFaceEmbeddings(userId);
 
       if (enrolledEmbeddings.length === 0) {
@@ -106,7 +131,11 @@ builder.mutationField('punchInFace', (t) =>
         throw new Error('Face is not enrolled for this account');
       }
 
-      const { matched, bestScore } = isMatch(args.embedding, enrolledEmbeddings, MATCH_THRESHOLD);
+      const { matched, bestScore } = isMatch(
+        args.embedding,
+        enrolledEmbeddings,
+        config.faceMatchThreshold,
+      );
 
       await attendanceService.logVerificationAttempt({
         userId,
@@ -127,6 +156,7 @@ builder.mutationField('punchInFace', (t) =>
         matchScore: bestScore,
         latitude: args.latitude ?? null,
         longitude: args.longitude ?? null,
+        address: args.address ?? null,
       });
 
       const token = await issueSessionToken(userId);

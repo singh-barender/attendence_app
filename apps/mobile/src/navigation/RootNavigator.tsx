@@ -19,6 +19,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AttendanceScreen } from '../screens/AttendanceScreen';
+import { AuthLoginScreen } from '../screens/AuthLoginScreen';
 import { LoginPunchInScreen } from '../screens/LoginPunchInScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ReEnrollFaceScreen } from '../screens/ReEnrollFaceScreen';
@@ -37,11 +38,8 @@ export function RootNavigator() {
         initialRouteName="Login"
         screenOptions={{ contentStyle: { backgroundColor: 'transparent' }, headerShown: false }}
       >
-        <Stack.Screen
-          name="Login"
-          component={LoginPunchInScreen}
-          options={{ title: 'Attendence App' }}
-        />
+        <Stack.Screen name="Login" component={AuthLoginScreen} options={{ title: 'Sign In' }} />
+        <Stack.Screen name="Punch" component={LoginPunchInScreen} options={{ title: 'Verify' }} />
         <Stack.Screen
           name="RegisterStep1"
           component={Step1BasicInfoScreen}

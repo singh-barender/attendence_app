@@ -32,8 +32,17 @@
  * `LinearGradient` renders on native, or it silently renders nothing
  * (confirmed from the library's own source) — importing it here, once, at
  * the app's actual entry point is the documented way to do that.
+ *
+ * `missedCheckoutTask` is imported here purely for its module-scope
+ * `TaskManager.defineTask` side effect (task 4.13 follow-up) — Expo's own
+ * docs require `defineTask` to run in the global scope, since the OS may
+ * launch the JS bundle fresh just to run a registered background task with
+ * no screen ever mounted; importing it lazily from `ProfileScreen` (only
+ * reachable if the user has visited Profile) would leave the task
+ * undefined on that cold background-only launch path.
  */
 import '@tamagui/native/setup-expo-linear-gradient';
+import './src/services/missedCheckoutTask';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';

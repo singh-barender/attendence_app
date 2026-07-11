@@ -2,6 +2,7 @@ query AttendanceHistory {
   attendanceHistory {
     date
     status
+    isLate
     hoursWorked
     checkIn {
       id
@@ -9,6 +10,7 @@ query AttendanceHistory {
       method
       latitude
       longitude
+      address
     }
     checkOut {
       id
@@ -16,6 +18,7 @@ query AttendanceHistory {
       method
       latitude
       longitude
+      address
     }
   }
 }

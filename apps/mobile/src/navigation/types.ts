@@ -10,10 +10,24 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 export type RootStackParamList = {
-  Login: undefined;
-  RegisterStep1: undefined;
-  RegisterStep2: { userId: string };
-  RegisterStep3: { userId: string };
+  /** Email + password sign-in (ADR-030). `email` pre-fills the field after
+   * registration hands off here. */
+  Login: { email?: string } | undefined;
+  /** The biometric check-in/out screen, reached from the dashboard once
+   * signed in. `intent` selects the wording/action; the punch itself is a
+   * real face/fingerprint verification (ADR-004/ADR-007) requiring the
+   * authenticated session (ADR-030). */
+  Punch: { intent: 'checkin' | 'checkout' };
+  /** `email` pre-fills the first registration field when the user reached
+   * here from Login's "account not found" path, so the email they just
+   * typed to look themselves up isn't thrown away and retyped. Optional —
+   * registration is also reachable cold (no param) as its own entry point. */
+  RegisterStep1: { email?: string } | undefined;
+  /** `email` is carried through the registration wizard purely so the final
+   * step can hand it to the check-in screen (a freshly-registered account
+   * shouldn't have to retype the email it just registered with). */
+  RegisterStep2: { userId: string; email: string };
+  RegisterStep3: { userId: string; email: string };
   Attendance: undefined;
   Profile: undefined;
   ReEnrollFingerprint: undefined;

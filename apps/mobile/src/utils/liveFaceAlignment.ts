@@ -19,6 +19,10 @@ export const MAX_FRONTAL_YAW_DEGREES = 12;
 
 export interface LiveAlignmentSample {
   readonly hasFace: boolean;
+  /** Faces detected this frame — more than one is never "aligned" (a second
+   * person must not be in frame). Optional so callers/fixtures without the
+   * signal default to single-face. */
+  readonly faceCount?: number;
   readonly faceBounds: FaceBounds | null;
   readonly frameWidth: number;
   readonly frameHeight: number;
@@ -27,6 +31,7 @@ export interface LiveAlignmentSample {
   readonly minYawDegrees: number;
   /** Inclusive upper bound the live yaw must meet for the current target angle. */
   readonly maxYawDegrees: number;
+  readonly isOccluded?: boolean;
 }
 
 /**
@@ -37,7 +42,10 @@ export interface LiveAlignmentSample {
  * job is steering them there in the first place).
  */
 export function assessLiveAlignment(sample: LiveAlignmentSample): boolean {
-  if (!sample.hasFace || !sample.faceBounds || sample.yawAngle === null) {
+  if (!sample.hasFace || !sample.faceBounds || sample.yawAngle === null || sample.isOccluded) {
+    return false;
+  }
+  if (sample.faceCount != null && sample.faceCount > 1) {
     return false;
   }
 

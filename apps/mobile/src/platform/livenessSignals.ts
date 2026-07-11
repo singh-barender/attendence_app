@@ -20,7 +20,7 @@ import type {
   LivenessChallengeType,
   LivenessSample,
 } from '@attendance-app/liveness';
-import { detectBlink, detectHeadTurn } from '@attendance-app/liveness';
+import { detectBlink, detectHeadTurn, detectNod, detectSmile } from '@attendance-app/liveness';
 import { useCallback, useRef, useState } from 'react';
 import type { LiveFaceInfo } from './faceCameraTypes';
 
@@ -41,6 +41,8 @@ export function faceToLivenessSample(face: LiveFaceInfo, timestampMs: number): L
     leftEyeOpenProbability: face.leftEyeOpen,
     rightEyeOpenProbability: face.rightEyeOpen,
     yawAngleDegrees: face.yawAngle,
+    smileProbability: face.smileProbability,
+    pitchAngleDegrees: face.pitchAngle,
   };
 }
 
@@ -68,7 +70,18 @@ export class LivenessChallengeSession {
 
   /** Judges whether the challenge has been completed by the samples collected so far. */
   getResult(): LivenessChallengeResult {
-    return this.type === 'blink' ? detectBlink(this.samples) : detectHeadTurn(this.samples);
+    switch (this.type) {
+      case 'blink':
+        return detectBlink(this.samples, 1);
+      case 'blink-twice':
+        return detectBlink(this.samples, 2);
+      case 'smile':
+        return detectSmile(this.samples);
+      case 'nod':
+        return detectNod(this.samples);
+      case 'head-turn':
+        return detectHeadTurn(this.samples);
+    }
   }
 
   reset(): void {

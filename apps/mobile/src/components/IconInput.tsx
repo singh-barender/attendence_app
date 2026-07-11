@@ -39,7 +39,18 @@ export function IconInput({ icon, ...inputProps }: IconInputProps) {
         color={palette.inkSoft}
         style={{ position: 'absolute', left: ICON_LEFT_OFFSET, zIndex: 1 }}
       />
-      <Input flex={1} {...inputProps} style={{ paddingLeft: INPUT_LEFT_PADDING }} />
+      <Input
+        flex={1}
+        {...inputProps}
+        // @ts-expect-error Tamagui types strictly require ColorTokens but raw strings work at runtime
+        placeholderTextColor={palette.inkSoft}
+        style={{
+          color: palette.ink,
+          backgroundColor: palette.glassSurface,
+          borderColor: palette.glassBorder,
+          paddingLeft: INPUT_LEFT_PADDING,
+        }}
+      />
     </XStack>
   );
 }

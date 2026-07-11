@@ -14,7 +14,14 @@ function sample(
   leftEyeOpenProbability: number | null,
   rightEyeOpenProbability: number | null = leftEyeOpenProbability,
 ): LivenessSample {
-  return { timestampMs, leftEyeOpenProbability, rightEyeOpenProbability, yawAngleDegrees: null };
+  return {
+    timestampMs,
+    leftEyeOpenProbability,
+    rightEyeOpenProbability,
+    yawAngleDegrees: null,
+    smileProbability: null,
+    pitchAngleDegrees: null,
+  };
 }
 
 describe('detectBlink', () => {

@@ -4,6 +4,7 @@
  * BiometricEnrollment writes to enrollmentService (ADR-005/ADR-006).
  */
 import { prisma } from '../../db/client';
+import * as authService from '../../services/authService';
 import * as enrollmentService from '../../services/enrollmentService';
 import * as userService from '../../services/userService';
 import { builder } from '../builder';
@@ -23,6 +24,7 @@ builder.mutationType({
       args: {
         fullName: t.arg.string({ required: true }),
         email: t.arg.string({ required: true }),
+        password: t.arg.string({ required: true }),
         age: t.arg.int(),
         gender: t.arg.string(),
         location: t.arg.string(),
@@ -31,12 +33,16 @@ builder.mutationType({
         userService.assertValidEmail(args.email);
         userService.assertValidAge(args.age);
         await userService.assertEmailNotRegistered(args.email);
+        // Hash (and validate length) before create — the plaintext never
+        // touches the row (ADR-030).
+        const passwordHash = await authService.hashPassword(args.password);
 
         return prisma.user.create({
           ...query,
           data: {
             fullName: args.fullName,
             email: args.email,
+            passwordHash,
             age: args.age ?? null,
             gender: args.gender ?? null,
             location: args.location ?? null,
