@@ -53,3 +53,28 @@ export function formatAttemptTimestamp(iso: string): string {
   const datePart = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   return `${datePart}, ${formatPunchTime(iso)}`;
 }
+
+/** "X ago" for a recent timestamp (task 4.13 follow-up — ProfileScreen's
+ * "Last verified" indicator); falls back to `formatAttemptTimestamp`'s
+ * absolute date+time beyond a week, where "9d ago" stops being more useful
+ * than just the date. */
+export function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+
+  if (diffMinutes < 1) {
+    return 'Just now';
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  }
+  return formatAttemptTimestamp(iso);
+}

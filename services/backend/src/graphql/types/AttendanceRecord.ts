@@ -26,5 +26,6 @@ export const AttendanceRecordRef = builder.prismaObject('AttendanceRecord', {
     matchScore: t.exposeFloat('matchScore', { nullable: true }),
     latitude: t.exposeFloat('latitude', { nullable: true }),
     longitude: t.exposeFloat('longitude', { nullable: true }),
+    address: t.exposeString('address', { nullable: true }),
   }),
 });

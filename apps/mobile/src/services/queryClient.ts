@@ -27,6 +27,19 @@
  *   calling `resumePausedMutations()` is a provider-lifecycle concern
  *   (needs an `onSuccess` callback tied to the restore completing), not
  *   something this module can do itself.
+ * - Each default also registers `onSuccess` to persist the returned session
+ *   token. This looks redundant with `LoginPunchInScreen`'s own per-call
+ *   `onSuccess` (which does the same, plus navigation) — it isn't: TanStack
+ *   Query builds a mutation's actual options via `{...defaults, ...perCallOptions}`
+ *   (a flat object spread, confirmed by reading `defaultMutationOptions` in
+ *   `query-core`), so a live screen's `onSuccess` always wins over this
+ *   default while the screen is mounted. This default only ever actually
+ *   runs for a mutation that was paused, then the *app itself* was
+ *   restarted before connectivity returned — `resumePausedMutations()`
+ *   rebuilds that mutation from these defaults alone, since the original
+ *   screen's callback (a function) couldn't survive being persisted to
+ *   storage. Without this, that specific case would silently punch the
+ *   user in server-side while leaving the client still logged out.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -40,7 +53,9 @@ import {
   type PunchInFingerprintMutation,
   type PunchInFingerprintMutationVariables,
 } from '../generated/graphql';
+import { setAuthToken } from './graphqlClient';
 import { fetcher } from './graphqlFetcher';
+import { saveToken } from './tokenStorage';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,17 +71,27 @@ onlineManager.setEventListener((setOnline) => {
   });
 });
 
+async function persistTokenIfPresent(token: string | null | undefined): Promise<void> {
+  if (!token) {
+    return;
+  }
+  await saveToken(token);
+  setAuthToken(token);
+}
+
 queryClient.setMutationDefaults(['PunchInFingerprint'], {
   mutationFn: (variables?: PunchInFingerprintMutationVariables) =>
     fetcher<PunchInFingerprintMutation, PunchInFingerprintMutationVariables>(
       PunchInFingerprintDocument,
       variables,
     )(),
+  onSuccess: (data) => persistTokenIfPresent(data.punchInFingerprint?.token),
 });
 
 queryClient.setMutationDefaults(['PunchInFace'], {
   mutationFn: (variables?: PunchInFaceMutationVariables) =>
     fetcher<PunchInFaceMutation, PunchInFaceMutationVariables>(PunchInFaceDocument, variables)(),
+  onSuccess: (data) => persistTokenIfPresent(data.punchInFace?.token),
 });
 
 export const persister = createAsyncStoragePersister({ storage: AsyncStorage });

@@ -18,6 +18,7 @@ import './types/VerificationAttempt';
 import './types/EnrollmentMetadata';
 import './types/MyDataExport';
 import './mutations/register';
+import './mutations/login';
 import './mutations/punchIn';
 import './mutations/reEnroll';
 import './mutations/deleteMyAccount';

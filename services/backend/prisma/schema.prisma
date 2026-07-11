@@ -39,14 +39,19 @@ model User {
   age              Int?
   gender           String?
   location         String?
+  // bcrypt hash of the account password (ADR-030). Nullable only so the
+  // migration is trivial on a fresh DB — the registration path always sets
+  // it, and login rejects an account with none. Never the plaintext; never
+  // logged. Password authenticates *dashboard access*; the biometric punch
+  // (face/fingerprint) remains the attendance event and its own security
+  // boundary (ADR-004's re-verification stance is unchanged for punches).
+  passwordHash     String?
   registrationStep Int      @default(1) // 1|2|3 — resumable registration wizard
   createdAt        DateTime @default(now())
 
   enrollments          BiometricEnrollment[]
   attendance           AttendanceRecord[]
   verificationAttempts VerificationAttempt[]
-
-  // No password field anywhere — biometric verification IS the login (ADR-004).
 }
 
 model BiometricEnrollment {
@@ -78,6 +83,12 @@ model AttendanceRecord {
   matchScore Float? // cosine similarity, FACE only — audit trail
   latitude   Float? // nullable — a denied location permission must not block punch-in (ADR-016)
   longitude  Float?
+  // Human-readable place name ("area/landmark, city") resolved client-side at
+  // punch time (Nominatim, one lookup per punch — never bulk server-side, which
+  // would violate its usage policy + ADR-015). Cosmetic metadata only: the
+  // server never trusts it for any decision. Nullable — offline/denied-location/
+  // failed-lookup punches (and every record predating this column) have none.
+  address    String?
 
   // Punch-type inference and the duplicate-punch guard both query "this user's
   // records for today" (ADR-016) — indexed for that lookup. The unique

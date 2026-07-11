@@ -1,6 +1,7 @@
 mutation RegisterStep1(
   $email: String!
   $fullName: String!
+  $password: String!
   $age: Int
   $gender: String
   $location: String
@@ -8,6 +9,7 @@ mutation RegisterStep1(
   registerStep1(
     email: $email
     fullName: $fullName
+    password: $password
     age: $age
     gender: $gender
     location: $location

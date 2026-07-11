@@ -14,24 +14,27 @@
   "dependencies": {
     "@attendance-app/face-matching": "workspace:*",
     "@attendance-app/shared-types": "workspace:*",
-    "@prisma/client": "catalog:",
+    "@fastify/cors": "catalog:",
+    "@fastify/rate-limit": "catalog:",
+    "@pothos/core": "catalog:",
+    "@pothos/plugin-prisma": "catalog:",
     "@prisma/adapter-better-sqlite3": "catalog:",
+    "@prisma/client": "catalog:",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "catalog:",
     "dotenv": "catalog:",
     "fastify": "catalog:",
-    "mercurius": "catalog:",
-    "@pothos/core": "catalog:",
-    "@pothos/plugin-prisma": "catalog:",
     "graphql": "catalog:",
-    "@fastify/cors": "catalog:",
-    "zod": "catalog:",
-    "jose": "catalog:"
+    "jose": "catalog:",
+    "mercurius": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "typescript": "catalog:",
+    "@types/bcryptjs": "^3.0.0",
+    "@types/node": "catalog:",
     "prisma": "catalog:",
     "tsx": "catalog:",
-    "vitest": "catalog:",
-    "@types/node": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

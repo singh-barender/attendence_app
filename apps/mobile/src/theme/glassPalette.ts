@@ -28,6 +28,12 @@ export interface GlassPalette {
   accent: string;
   /** Text color used on top of `accent` fills (e.g. primary button labels). */
   accentInk: string;
+  /** Destructive-action fill (e.g. "Delete my account") — a red tuned to
+   * read clearly on the glass surface in each theme, replacing a raw
+   * `$red9`/`white` pairing that rendered as a low-contrast grey button. */
+  danger: string;
+  /** Text color used on top of `danger` fills. */
+  dangerInk: string;
 }
 
 const DARK: GlassPalette = {
@@ -40,6 +46,8 @@ const DARK: GlassPalette = {
   inkSoft: 'rgba(243, 241, 247, 0.65)',
   accent: '#B79CFF',
   accentInk: '#241B33',
+  danger: '#E5534B',
+  dangerInk: '#FFFFFF',
 };
 
 const LIGHT: GlassPalette = {
@@ -52,6 +60,8 @@ const LIGHT: GlassPalette = {
   inkSoft: 'rgba(36, 27, 51, 0.62)',
   accent: '#6B3FD1',
   accentInk: '#FFFFFF',
+  danger: '#B3261E',
+  dangerInk: '#FFFFFF',
 };
 
 export const GLASS_PALETTES = { light: LIGHT, dark: DARK } as const;

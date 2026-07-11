@@ -17,7 +17,8 @@
  * (calibrated for legibility on the colorful gradient) rather than the old
  * flat-background `$color`/`$color10` tokens.
  */
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
+import type { RefreshControlProps } from 'react-native';
 import { ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { H1, Text, YStack } from 'tamagui';
@@ -29,15 +30,30 @@ interface ScreenContainerProps {
   description: string;
   progress?: ReactNode;
   children?: ReactNode;
+  /** Optional pull-to-refresh control (a plain RN `<RefreshControl>`),
+   * passed straight through to the underlying `ScrollView` — only
+   * `AttendanceScreen` uses this today, but it's a generic passthrough
+   * rather than something Attendance-specific. */
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
-export function ScreenContainer({ title, description, progress, children }: ScreenContainerProps) {
+export function ScreenContainer({
+  title,
+  description,
+  progress,
+  children,
+  refreshControl,
+}: ScreenContainerProps) {
   const insets = useSafeAreaInsets();
   const { resolvedTheme } = useThemePreference();
   const palette = GLASS_PALETTES[resolvedTheme];
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      contentContainerStyle={{ flexGrow: 1 }}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={refreshControl}
+    >
       <YStack flex={1} gap="$4" p="$4" style={{ paddingTop: insets.top + 16 }}>
         <H1 style={{ color: palette.ink }}>{title}</H1>
         {progress}

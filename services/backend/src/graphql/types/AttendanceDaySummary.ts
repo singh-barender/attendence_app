@@ -24,6 +24,7 @@ export const AttendanceDaySummaryRef = builder
         resolve: (summary) => summary.checkOut,
       }),
       status: t.field({ type: AttendanceStatusEnum, resolve: (summary) => summary.status }),
+      isLate: t.exposeBoolean('isLate'),
       hoursWorked: t.exposeFloat('hoursWorked', { nullable: true }),
     }),
   });

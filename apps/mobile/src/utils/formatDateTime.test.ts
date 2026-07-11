@@ -3,6 +3,7 @@ import {
   formatHoursWorked,
   formatMemberSince,
   formatMonthYear,
+  formatRelativeTime,
   toDateOnlyString,
 } from './formatDateTime';
 
@@ -56,5 +57,30 @@ describe('formatAttemptTimestamp', () => {
     // than asserting one exact wall-clock string.
     const result = formatAttemptTimestamp('2026-07-09T12:00:00.000Z');
     expect(result).toMatch(/^Jul 9, \d{1,2}:\d{2}\s?[AP]M$/);
+  });
+});
+
+describe('formatRelativeTime', () => {
+  it('shows "Just now" for a timestamp under a minute old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 30_000).toISOString())).toBe('Just now');
+  });
+
+  it('shows minutes ago for a timestamp under an hour old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 5 * 60_000).toISOString())).toBe('5m ago');
+  });
+
+  it('shows hours ago for a timestamp under a day old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 3 * 60 * 60_000).toISOString())).toBe('3h ago');
+  });
+
+  it('shows days ago for a timestamp under a week old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString())).toBe(
+      '2d ago',
+    );
+  });
+
+  it('falls back to the absolute date+time beyond a week', () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString();
+    expect(formatRelativeTime(tenDaysAgo)).toBe(formatAttemptTimestamp(tenDaysAgo));
   });
 });

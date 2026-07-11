@@ -25,7 +25,8 @@
  * use.
  */
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useState } from 'react';
 import { Button, Input, Spinner, Text, XStack, YStack } from 'tamagui';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { GlassCard } from '../components/GlassCard';
@@ -43,9 +44,24 @@ import type { RootScreenProps } from '../navigation/types';
 import { FINGERPRINT_SUPPORTED } from '../platform/biometric';
 import { saveMyDataExport } from '../platform/dataExport';
 import { getErrorMessage } from '../services/graphqlError';
-import { clearToken } from '../services/tokenStorage';
+import {
+  disableMissedCheckoutAlert,
+  enableMissedCheckoutAlert,
+  isMissedCheckoutAlertEnabled,
+} from '../services/missedCheckoutTask';
+import {
+  disableDailyReminder,
+  enableDailyReminder,
+  isDailyReminderEnabled,
+  NOTIFICATIONS_SUPPORTED,
+} from '../services/notifications';
+import { logout } from '../services/session';
 import { GLASS_PALETTES } from '../theme/glassPalette';
-import { formatAttemptTimestamp, formatMemberSince } from '../utils/formatDateTime';
+import {
+  formatAttemptTimestamp,
+  formatMemberSince,
+  formatRelativeTime,
+} from '../utils/formatDateTime';
 
 const DELETE_CONFIRMATION_PHRASE = 'DELETE';
 
@@ -171,13 +187,14 @@ function DeleteAccountConfirmation({
         </Button>
         <Button
           flex={1}
-          background="$red9"
-          color="white"
           onPress={onConfirm}
           disabled={!canConfirm || isDeleting}
+          style={{ backgroundColor: palette.danger, opacity: !canConfirm || isDeleting ? 0.5 : 1 }}
           {...(isDeleting ? { icon: <Spinner /> } : {})}
         >
-          {isDeleting ? 'Deleting...' : 'Permanently delete'}
+          <Text style={{ color: palette.dangerInk, fontWeight: '700' }}>
+            {isDeleting ? 'Deleting...' : 'Permanently delete'}
+          </Text>
         </Button>
       </XStack>
     </YStack>
@@ -185,7 +202,8 @@ function DeleteAccountConfirmation({
 }
 
 export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
-  const { resolvedTheme, setPreference } = useThemePreference();
+  const queryClient = useQueryClient();
+  const { resolvedTheme, preference, setPreference } = useThemePreference();
   const palette = GLASS_PALETTES[resolvedTheme];
   const { data, isLoading, isError, error, refetch, isRefetching } = useMeQuery();
   const {
@@ -200,6 +218,12 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const [isDownloadingData, setIsDownloadingData] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isReminderEnabled, setIsReminderEnabled] = useState(false);
+  const [isTogglingReminder, setIsTogglingReminder] = useState(false);
+  const [reminderError, setReminderError] = useState<string | null>(null);
+  const [isMissedCheckoutEnabled, setIsMissedCheckoutEnabled] = useState(false);
+  const [isTogglingMissedCheckout, setIsTogglingMissedCheckout] = useState(false);
+  const [missedCheckoutError, setMissedCheckoutError] = useState<string | null>(null);
 
   const {
     mutate: deleteAccount,
@@ -208,10 +232,17 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
     error: deleteError,
   } = useDeleteMyAccountMutation({
     onSuccess: async () => {
-      await clearToken();
+      // Deletion is a logout plus the server-side data removal — reuse the one
+      // logout path so token/header/cache are cleared identically either way.
+      await logout(queryClient);
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     },
   });
+
+  async function handleLogout() {
+    await logout(queryClient);
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -219,6 +250,62 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
       refetchAttempts();
     }, [refetch, refetchAttempts]),
   );
+
+  useEffect(() => {
+    if (!NOTIFICATIONS_SUPPORTED) {
+      return;
+    }
+    isDailyReminderEnabled().then(setIsReminderEnabled);
+    isMissedCheckoutAlertEnabled().then(setIsMissedCheckoutEnabled);
+  }, []);
+
+  async function handleToggleReminder() {
+    setReminderError(null);
+    setIsTogglingReminder(true);
+    try {
+      if (isReminderEnabled) {
+        await disableDailyReminder();
+        setIsReminderEnabled(false);
+        return;
+      }
+      const granted = await enableDailyReminder();
+      if (!granted) {
+        setReminderError(
+          'Notifications permission was denied — enable it for this app in your device Settings, then try again.',
+        );
+        return;
+      }
+      setIsReminderEnabled(true);
+    } finally {
+      setIsTogglingReminder(false);
+    }
+  }
+
+  /** Separate from `handleToggleReminder` (own state, own toggle) — this one
+   * registers recurring background execution, a meaningfully different
+   * resource cost from a single scheduled alarm, so the user can opt into
+   * each independently rather than one toggle silently doing both. */
+  async function handleToggleMissedCheckout() {
+    setMissedCheckoutError(null);
+    setIsTogglingMissedCheckout(true);
+    try {
+      if (isMissedCheckoutEnabled) {
+        await disableMissedCheckoutAlert();
+        setIsMissedCheckoutEnabled(false);
+        return;
+      }
+      const granted = await enableMissedCheckoutAlert();
+      if (!granted) {
+        setMissedCheckoutError(
+          'Notifications permission was denied — enable it for this app in your device Settings, then try again.',
+        );
+        return;
+      }
+      setIsMissedCheckoutEnabled(true);
+    } finally {
+      setIsTogglingMissedCheckout(false);
+    }
+  }
 
   async function handleDownloadData() {
     setDownloadError(null);
@@ -242,6 +329,14 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
   const errorMessage = isError ? getErrorMessage(error) : null;
   const isUnauthorized = errorMessage?.includes('Unauthorized') ?? false;
   const profile = data?.me;
+  /** "Last verified" trust indicator (task 4.13 follow-up) — derived from
+   * the audit trail `myVerificationAttempts` already fetches (task 4.4), not
+   * a new query. Only a *successful* attempt counts as "verified"; a failed
+   * one isn't. Attempts are already ordered most-recent-first, so the first
+   * SUCCESS entry is the most recent one. */
+  const lastSuccessfulVerification = attemptsData?.myVerificationAttempts?.find(
+    (attempt) => attempt.outcome === 'SUCCESS',
+  );
 
   return (
     <ScreenContainer title="Profile" description="Your account info and enrollment status.">
@@ -283,6 +378,12 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
             {profile.createdAt ? (
               <InfoRow label="Member since" value={formatMemberSince(profile.createdAt)} />
             ) : null}
+            {lastSuccessfulVerification?.timestamp ? (
+              <InfoRow
+                label="Last verified"
+                value={formatRelativeTime(lastSuccessfulVerification.timestamp)}
+              />
+            ) : null}
           </GlassCard>
 
           <GlassCard>
@@ -297,20 +398,20 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 enrolled={profile.enrollmentStatus?.fingerprintEnrolled ?? false}
               />
             ) : null}
-            <XStack gap="$2" mt="$2">
-              <Button flex={1} size="$3" onPress={() => navigation.navigate('ReEnrollFace')}>
+            {/* Stacked full-width (matching the Data Controls card below)
+                rather than side-by-side: "Re-enroll fingerprint" is too long
+                to fit a half-width button and was truncating to
+                "Re-enroll fingerpri…". */}
+            <YStack gap="$2" mt="$2">
+              <Button size="$3" onPress={() => navigation.navigate('ReEnrollFace')}>
                 Re-enroll face
               </Button>
               {FINGERPRINT_SUPPORTED ? (
-                <Button
-                  flex={1}
-                  size="$3"
-                  onPress={() => navigation.navigate('ReEnrollFingerprint')}
-                >
+                <Button size="$3" onPress={() => navigation.navigate('ReEnrollFingerprint')}>
                   Re-enroll fingerprint
                 </Button>
               ) : null}
-            </XStack>
+            </YStack>
           </GlassCard>
 
           <GlassCard>
@@ -354,13 +455,13 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 flex={1}
                 size="$3"
                 style={{
-                  backgroundColor: resolvedTheme === 'light' ? palette.accent : undefined,
+                  backgroundColor: preference === 'light' ? palette.accent : undefined,
                 }}
                 onPress={() => setPreference('light')}
               >
                 <Text
                   style={{
-                    color: resolvedTheme === 'light' ? palette.accentInk : palette.inkSoft,
+                    color: preference === 'light' ? palette.accentInk : palette.inkSoft,
                     fontWeight: '700',
                   }}
                 >
@@ -371,21 +472,89 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 flex={1}
                 size="$3"
                 style={{
-                  backgroundColor: resolvedTheme === 'dark' ? palette.accent : undefined,
+                  backgroundColor: preference === 'dark' ? palette.accent : undefined,
                 }}
                 onPress={() => setPreference('dark')}
               >
                 <Text
                   style={{
-                    color: resolvedTheme === 'dark' ? palette.accentInk : palette.inkSoft,
+                    color: preference === 'dark' ? palette.accentInk : palette.inkSoft,
                     fontWeight: '700',
                   }}
                 >
                   Dark
                 </Text>
               </Button>
+              <Button
+                flex={1}
+                size="$3"
+                style={{
+                  backgroundColor: preference === 'system' ? palette.accent : undefined,
+                }}
+                onPress={() => setPreference('system')}
+              >
+                <Text
+                  style={{
+                    color: preference === 'system' ? palette.accentInk : palette.inkSoft,
+                    fontWeight: '700',
+                  }}
+                >
+                  System
+                </Text>
+              </Button>
             </XStack>
           </GlassCard>
+
+          {NOTIFICATIONS_SUPPORTED ? (
+            <GlassCard>
+              <SectionHeading>Notifications</SectionHeading>
+              <Text style={{ color: palette.inkSoft }}>
+                A daily local reminder to check in — no account/server involved, purely on this
+                device.
+              </Text>
+              {reminderError ? <FeedbackBanner variant="error" message={reminderError} /> : null}
+              <Button
+                onPress={handleToggleReminder}
+                disabled={isTogglingReminder}
+                style={{ backgroundColor: isReminderEnabled ? palette.accent : undefined }}
+                {...(isTogglingReminder ? { icon: <Spinner /> } : {})}
+              >
+                <Text
+                  style={{
+                    color: isReminderEnabled ? palette.accentInk : palette.inkSoft,
+                    fontWeight: '700',
+                  }}
+                >
+                  {isReminderEnabled ? 'DAILY REMINDER: ON' : 'DAILY REMINDER: OFF'}
+                </Text>
+              </Button>
+
+              <Text style={{ color: palette.inkSoft }}>
+                A low-frequency background check (at most every 15 minutes, batched by the OS) that
+                alerts you if a check-in has stayed open unusually long.
+              </Text>
+              {missedCheckoutError ? (
+                <FeedbackBanner variant="error" message={missedCheckoutError} />
+              ) : null}
+              <Button
+                onPress={handleToggleMissedCheckout}
+                disabled={isTogglingMissedCheckout}
+                style={{ backgroundColor: isMissedCheckoutEnabled ? palette.accent : undefined }}
+                {...(isTogglingMissedCheckout ? { icon: <Spinner /> } : {})}
+              >
+                <Text
+                  style={{
+                    color: isMissedCheckoutEnabled ? palette.accentInk : palette.inkSoft,
+                    fontWeight: '700',
+                  }}
+                >
+                  {isMissedCheckoutEnabled
+                    ? 'MISSED CHECKOUT ALERTS: ON'
+                    : 'MISSED CHECKOUT ALERTS: OFF'}
+                </Text>
+              </Button>
+            </GlassCard>
+          ) : null}
 
           <GlassCard>
             <SectionHeading>Data controls</SectionHeading>
@@ -398,6 +567,10 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
               {isDownloadingData ? 'Preparing download...' : 'Download my data'}
             </Button>
 
+            <Button onPress={handleLogout} variant="outlined">
+              <Text style={{ color: palette.ink, fontWeight: '600' }}>Log out</Text>
+            </Button>
+
             {isConfirmingDelete ? (
               <DeleteAccountConfirmation
                 onConfirm={() => deleteAccount({})}
@@ -406,8 +579,13 @@ export function ProfileScreen({ navigation }: RootScreenProps<'Profile'>) {
                 deleteError={isDeleteError ? getErrorMessage(deleteError) : null}
               />
             ) : (
-              <Button background="$red9" color="white" onPress={() => setIsConfirmingDelete(true)}>
-                Delete my account
+              <Button
+                onPress={() => setIsConfirmingDelete(true)}
+                style={{ backgroundColor: palette.danger }}
+              >
+                <Text style={{ color: palette.dangerInk, fontWeight: '700', letterSpacing: 1 }}>
+                  DELETE MY ACCOUNT
+                </Text>
               </Button>
             )}
           </GlassCard>

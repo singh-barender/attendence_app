@@ -7,15 +7,15 @@
  * dependency (e.g. AsyncStorage) for a single non-sensitive setting.
  */
 import * as SecureStore from 'expo-secure-store';
-import type { ThemePreference } from './themePreferenceTypes';
+import type { StoredThemePreference } from './themePreferenceTypes';
 
 const THEME_PREFERENCE_KEY = 'attendance.themePreference';
 
-export async function saveThemePreference(preference: ThemePreference): Promise<void> {
+export async function saveThemePreference(preference: StoredThemePreference): Promise<void> {
   await SecureStore.setItemAsync(THEME_PREFERENCE_KEY, preference);
 }
 
-export async function loadThemePreference(): Promise<ThemePreference | null> {
+export async function loadThemePreference(): Promise<StoredThemePreference | null> {
   const value = await SecureStore.getItemAsync(THEME_PREFERENCE_KEY);
-  return value === 'light' || value === 'dark' ? value : null;
+  return value === 'light' || value === 'dark' || value === 'system' ? value : null;
 }

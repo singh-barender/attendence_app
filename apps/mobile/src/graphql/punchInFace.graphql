@@ -1,5 +1,17 @@
-mutation PunchInFace($userId: ID!, $embedding: [Float!]!, $latitude: Float, $longitude: Float) {
-  punchInFace(userId: $userId, embedding: $embedding, latitude: $latitude, longitude: $longitude) {
+mutation PunchInFace(
+  $userId: ID!
+  $embedding: [Float!]!
+  $latitude: Float
+  $longitude: Float
+  $address: String
+) {
+  punchInFace(
+    userId: $userId
+    embedding: $embedding
+    latitude: $latitude
+    longitude: $longitude
+    address: $address
+  ) {
     matched
     bestScore
     type
@@ -13,6 +25,7 @@ mutation PunchInFace($userId: ID!, $embedding: [Float!]!, $latitude: Float, $lon
       matchScore
       latitude
       longitude
+      address
     }
   }
 }

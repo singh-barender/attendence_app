@@ -53,6 +53,7 @@ catalog:
   # major — see decisions.md ADR-011.
   graphql: ^16.14.2
   "@fastify/cors": ^11.2.0
+  "@fastify/rate-limit": ^11.1.0
   zod: ^4.4.3
   jose: ^6.2.3
   tamagui: ^2.4.2

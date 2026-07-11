@@ -15,6 +15,8 @@ function sample(timestampMs: number, yawAngleDegrees: number | null): LivenessSa
     leftEyeOpenProbability: null,
     rightEyeOpenProbability: null,
     yawAngleDegrees,
+    smileProbability: null,
+    pitchAngleDegrees: null,
   };
 }
 

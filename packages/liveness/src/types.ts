@@ -15,8 +15,9 @@ export interface LivenessSample {
   /** Eye-open probability in [0, 1] — null if the detector didn't report one for this frame. */
   readonly leftEyeOpenProbability: number | null;
   readonly rightEyeOpenProbability: number | null;
-  /** Head yaw (left/right rotation) in degrees — null if undetected this frame. */
   readonly yawAngleDegrees: number | null;
+  readonly smileProbability: number | null;
+  readonly pitchAngleDegrees: number | null;
 }
 
 /** Outcome of judging a blink challenge against a sample window. */
@@ -38,13 +39,24 @@ export interface HeadTurnDetectionResult {
   readonly direction: HeadTurnDirection | null;
 }
 
+export interface SmileDetectionResult {
+  readonly detected: boolean;
+}
+
+export interface NodDetectionResult {
+  readonly detected: boolean;
+}
+
 /**
  * Which challenge a screen is presenting. Shared by both platforms' signal
  * extractors (`livenessSignals.native.ts`/`livenessSignals.web.ts`) and the
  * platform-agnostic `LivenessChallengeOverlay` UI component, so the overlay
  * never needs to import a platform-specific module just for this type.
  */
-export type LivenessChallengeType = 'blink' | 'head-turn';
+export type LivenessChallengeType = 'blink' | 'blink-twice' | 'head-turn' | 'smile' | 'nod';
 
-/** Either detection result, discriminated by which challenge type produced it. */
-export type LivenessChallengeResult = BlinkDetectionResult | HeadTurnDetectionResult;
+export type LivenessChallengeResult =
+  | BlinkDetectionResult
+  | HeadTurnDetectionResult
+  | SmileDetectionResult
+  | NodDetectionResult;

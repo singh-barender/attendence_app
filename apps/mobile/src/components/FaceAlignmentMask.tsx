@@ -28,6 +28,13 @@ import Svg, { Defs, Ellipse, Mask, Rect } from 'react-native-svg';
 import { View, YStack } from 'tamagui';
 import type { GlassPalette } from '../theme/glassPalette';
 
+/** Alignment-oval bounding box, shared by every screen that renders this
+ * mask (enrollment, re-enrollment, and login/punch face verification) so
+ * they all steer the user toward the exact same framing — a single source
+ * of truth rather than each screen picking its own oval size. */
+export const ALIGNMENT_OVAL_WIDTH = 170;
+export const ALIGNMENT_OVAL_HEIGHT = 230;
+
 interface FaceAlignmentMaskProps {
   containerWidth: number;
   containerHeight: number;

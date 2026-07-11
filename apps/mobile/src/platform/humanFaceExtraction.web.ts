@@ -38,3 +38,19 @@ export function yawDegreesFrom(face: FaceResult): number | null {
   }
   return yawRadians * (180 / Math.PI);
 }
+
+export function pitchDegreesFrom(face: FaceResult): number | null {
+  const pitchRadians = face.rotation?.angle.pitch;
+  if (pitchRadians === undefined || pitchRadians === null) {
+    return null;
+  }
+  return pitchRadians * (180 / Math.PI);
+}
+
+export function smileProbabilityFrom(face: FaceResult): number | null {
+  if (!face.emotion || !Array.isArray(face.emotion)) {
+    return null;
+  }
+  const happy = face.emotion.find((e) => e.emotion === 'happy');
+  return happy ? happy.score : null;
+}

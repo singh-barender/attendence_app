@@ -16,34 +16,49 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { loadThemePreference, saveThemePreference } from '../services/themePreference';
-import type { ThemePreference } from '../services/themePreferenceTypes';
+import type { StoredThemePreference, ThemePreference } from '../services/themePreferenceTypes';
 
-export type { ThemePreference };
+export type { StoredThemePreference, ThemePreference };
 
 interface ThemePreferenceContextValue {
   resolvedTheme: ThemePreference;
-  setPreference: (preference: ThemePreference) => void;
+  /** The raw stored/selected preference, including `'system'` — distinct
+   * from `resolvedTheme` (always a concrete light/dark) so `ProfileScreen`'s
+   * Appearance toggle knows which of its three buttons to highlight
+   * (task 4.13 follow-up). */
+  preference: StoredThemePreference;
+  setPreference: (preference: StoredThemePreference) => void;
 }
 
 const ThemePreferenceContext = createContext<ThemePreferenceContextValue | null>(null);
 
 export function ThemePreferenceProvider({ children }: { children: ReactNode }) {
   const systemScheme = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference | null>(null);
+  const [preference, setPreferenceState] = useState<StoredThemePreference | null>(null);
 
   useEffect(() => {
     loadThemePreference().then(setPreferenceState);
   }, []);
 
-  function setPreference(next: ThemePreference) {
+  function setPreference(next: StoredThemePreference) {
     setPreferenceState(next);
     saveThemePreference(next);
   }
 
-  const resolvedTheme: ThemePreference = preference ?? (systemScheme === 'dark' ? 'dark' : 'light');
+  // No explicit preference saved yet on first launch reads the same as an
+  // explicit 'system' choice — both mean "follow the OS."
+  const effectivePreference: StoredThemePreference = preference ?? 'system';
+  const resolvedTheme: ThemePreference =
+    effectivePreference === 'system'
+      ? systemScheme === 'dark'
+        ? 'dark'
+        : 'light'
+      : effectivePreference;
 
   return (
-    <ThemePreferenceContext.Provider value={{ resolvedTheme, setPreference }}>
+    <ThemePreferenceContext.Provider
+      value={{ resolvedTheme, preference: effectivePreference, setPreference }}
+    >
       {children}
     </ThemePreferenceContext.Provider>
   );

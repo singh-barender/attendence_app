@@ -15,7 +15,7 @@
 import type { ColorTokens } from 'tamagui';
 import { Text, YStack } from 'tamagui';
 
-type FeedbackVariant = 'error' | 'success' | 'info';
+type FeedbackVariant = 'error' | 'success' | 'info' | 'pending';
 
 interface VariantStyle {
   background: string;
@@ -42,6 +42,16 @@ const VARIANT_STYLES: Record<FeedbackVariant, VariantStyle> = {
     border: 'rgba(74, 111, 232, 0.4)',
     text: '$blue10',
     icon: 'ⓘ',
+  },
+  // A queued-but-not-yet-server-confirmed punch (ADR-017) must read as
+  // visibly distinct from both "success" and an ordinary "info" note — an
+  // amber/hourglass treatment reads as "still in progress," not "done" or
+  // "just FYI."
+  pending: {
+    background: 'rgba(217, 143, 47, 0.16)',
+    border: 'rgba(217, 143, 47, 0.4)',
+    text: '$yellow10',
+    icon: '⏳',
   },
 };
 

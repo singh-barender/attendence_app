@@ -15,17 +15,22 @@
  */
 import type { ComponentRef, ReactNode } from 'react';
 import { useRef, useState } from 'react';
-import { Button, Image, Spinner, Text, YStack } from 'tamagui';
+import { Image } from 'react-native';
+import { Button, Spinner, Text, YStack } from 'tamagui';
 import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import { FaceCameraView, useFaceCameraPermission } from '../platform/faceCamera';
-import type { LiveFaceInfo } from '../platform/faceCameraTypes';
+import { FRAME_STATE_THROTTLE_MS, type LiveFaceInfo } from '../platform/faceCameraTypes';
 import { faceEmbedder } from '../platform/faceEmbedder';
 import { getErrorMessage } from '../services/graphqlError';
 import { GLASS_PALETTES } from '../theme/glassPalette';
 import { assessEnrollmentQuality } from '../utils/enrollmentQuality';
 import { ANGLE_INFO, ANGLES, type Angle } from '../utils/faceAngles';
 import { assessLiveAlignment } from '../utils/liveFaceAlignment';
-import { FaceAlignmentMask } from './FaceAlignmentMask';
+import {
+  ALIGNMENT_OVAL_HEIGHT,
+  ALIGNMENT_OVAL_WIDTH,
+  FaceAlignmentMask,
+} from './FaceAlignmentMask';
 import { FaceAngleHint } from './FaceAngleHint';
 import { FeedbackBanner } from './FeedbackBanner';
 
@@ -40,27 +45,18 @@ interface AngleCapture {
   embedding: number[];
 }
 
-/**
- * The frame counter is a debug readout, not a data source anything
- * depends on — updating React state on every single camera frame would
- * cause excessive re-renders for no benefit, so JS-side updates are
- * throttled to this interval regardless of how often frames actually arrive.
- */
-const FRAME_STATUS_UPDATE_INTERVAL_MS = 500;
-
-/** Alignment-oval bounding box — also the size of the clear "window" left
- * in `FaceAlignmentMask`'s blurred surround, so the two must stay in sync. */
-const ALIGNMENT_OVAL_WIDTH = 170;
-const ALIGNMENT_OVAL_HEIGHT = 230;
-
 const EMPTY_FACE_INFO: LiveFaceInfo = {
   hasFace: false,
+  faceCount: 0,
   bounds: null,
   frameWidth: 0,
   frameHeight: 0,
   yawAngle: null,
   leftEyeOpen: null,
   rightEyeOpen: null,
+  smileProbability: null,
+  pitchAngle: null,
+  isOccluded: false,
 };
 
 interface FaceEnrollmentCaptureProps {
@@ -111,7 +107,7 @@ export function FaceEnrollmentCapture({
     latestFaceInfoRef.current = info;
 
     const now = Date.now();
-    if (now - lastFrameStatusUpdateRef.current < FRAME_STATUS_UPDATE_INTERVAL_MS) {
+    if (now - lastFrameStatusUpdateRef.current < FRAME_STATE_THROTTLE_MS) {
       return;
     }
     lastFrameStatusUpdateRef.current = now;
@@ -127,12 +123,14 @@ export function FaceEnrollmentCapture({
   const isAligned = nextAngle
     ? assessLiveAlignment({
         hasFace: frameStats.face.hasFace,
+        faceCount: frameStats.face.faceCount,
         faceBounds: frameStats.face.bounds,
         frameWidth: frameStats.face.frameWidth,
         frameHeight: frameStats.face.frameHeight,
         yawAngle: frameStats.face.yawAngle,
         minYawDegrees: ANGLE_INFO[nextAngle].minYaw,
         maxYawDegrees: ANGLE_INFO[nextAngle].maxYaw,
+        isOccluded: frameStats.face.isOccluded,
       })
     : false;
 
@@ -151,11 +149,15 @@ export function FaceEnrollmentCapture({
 
       const quality = assessEnrollmentQuality({
         hasFace: faceInfo.hasFace,
+        faceCount: faceInfo.faceCount,
         faceBounds: faceInfo.bounds,
         frameWidth: faceInfo.frameWidth,
         frameHeight: faceInfo.frameHeight,
         averageBrightness: captured.averageBrightness,
         sharpnessScore: captured.sharpnessScore,
+        leftEyeOpen: faceInfo.leftEyeOpen,
+        rightEyeOpen: faceInfo.rightEyeOpen,
+        isOccluded: faceInfo.isOccluded,
       });
       if (!quality.accepted || !faceInfo.bounds) {
         setCaptureError(quality.message ?? 'Capture rejected — please try again.');
@@ -227,8 +229,15 @@ export function FaceEnrollmentCapture({
 
       {nextAngle ? (
         <>
-          <Text style={{ color: palette.ink, fontWeight: '600' }}>
-            {ANGLE_INFO[nextAngle].instruction}
+          <Text
+            style={{
+              color: frameStats.face.isOccluded ? palette.danger : palette.ink,
+              fontWeight: '600',
+            }}
+          >
+            {frameStats.face.isOccluded
+              ? 'Something is covering your face. Please ensure your face is clearly visible.'
+              : ANGLE_INFO[nextAngle].instruction}
           </Text>
           <YStack
             onLayout={(event) => {
@@ -266,7 +275,11 @@ export function FaceEnrollmentCapture({
               palette={palette}
             />
           </YStack>
-          {frameStats.count > 0 ? (
+          {/* Developer-only frame-pipeline readout (frame count, resolution,
+              face presence, eye/yaw signals) — invaluable while debugging the
+              detection pipeline on-device, but noise to a real user, so it's
+              gated to __DEV__ builds and never ships in production. */}
+          {__DEV__ && frameStats.count > 0 ? (
             <Text style={{ color: palette.inkSoft }} fontSize="$1">
               Frame pipeline: {frameStats.count} frames seen ({frameStats.face.frameWidth}x
               {frameStats.face.frameHeight}) — {frameStats.face.hasFace ? '1' : '0'} face(s)
@@ -306,11 +319,19 @@ export function FaceEnrollmentCapture({
         {ANGLES.map((angle) =>
           photos[angle] ? (
             <YStack key={angle} gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {/* React Native's own Image (not Tamagui's) renders the
+                  captured `file://` (native) / `data:` (web) preview reliably;
+                  Tamagui's Image was leaving these local-URI thumbnails
+                  blank. The palette-tinted background is a visible placeholder
+                  so the slot reads as an image frame even while it decodes. */}
               <Image
                 source={{ uri: photos[angle].previewUri }}
-                width={60}
-                height={60}
-                style={{ borderRadius: 8 }}
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 8,
+                  backgroundColor: palette.glassBorder,
+                }}
               />
               <Text style={{ color: palette.ink }} flex={1}>
                 {ANGLE_INFO[angle].label}
