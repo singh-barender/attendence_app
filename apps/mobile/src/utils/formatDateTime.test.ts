@@ -1,4 +1,11 @@
-import { formatHoursWorked } from './formatDateTime';
+import {
+  formatAttemptTimestamp,
+  formatHoursWorked,
+  formatMemberSince,
+  formatMonthYear,
+  formatRelativeTime,
+  toDateOnlyString,
+} from './formatDateTime';
 
 describe('formatHoursWorked', () => {
   it('formats a whole number of hours with no minutes', () => {
@@ -17,5 +24,63 @@ describe('formatHoursWorked', () => {
 
   it('handles zero hours worked', () => {
     expect(formatHoursWorked(0)).toBe('0h 0m');
+  });
+});
+
+describe('formatMemberSince', () => {
+  it('formats an ISO timestamp as a long date', () => {
+    expect(formatMemberSince('2026-01-05T12:00:00.000Z')).toBe('January 5, 2026');
+  });
+});
+
+describe('formatMonthYear', () => {
+  it('formats a 0-based month index as a full month name with year', () => {
+    expect(formatMonthYear(2026, 0)).toBe('January 2026');
+    expect(formatMonthYear(2026, 11)).toBe('December 2026');
+  });
+});
+
+describe('toDateOnlyString', () => {
+  it('zero-pads single-digit months and days', () => {
+    expect(toDateOnlyString(2026, 0, 5)).toBe('2026-01-05');
+  });
+
+  it('leaves double-digit months and days unpadded', () => {
+    expect(toDateOnlyString(2026, 11, 25)).toBe('2026-12-25');
+  });
+});
+
+describe('formatAttemptTimestamp', () => {
+  it('combines a short date with the time-of-day, comma-separated', () => {
+    // Time-of-day is timezone-dependent in the test environment, so this
+    // checks structure (date part + separator + a time-like suffix) rather
+    // than asserting one exact wall-clock string.
+    const result = formatAttemptTimestamp('2026-07-09T12:00:00.000Z');
+    expect(result).toMatch(/^Jul 9, \d{1,2}:\d{2}\s?[AP]M$/);
+  });
+});
+
+describe('formatRelativeTime', () => {
+  it('shows "Just now" for a timestamp under a minute old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 30_000).toISOString())).toBe('Just now');
+  });
+
+  it('shows minutes ago for a timestamp under an hour old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 5 * 60_000).toISOString())).toBe('5m ago');
+  });
+
+  it('shows hours ago for a timestamp under a day old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 3 * 60 * 60_000).toISOString())).toBe('3h ago');
+  });
+
+  it('shows days ago for a timestamp under a week old', () => {
+    expect(formatRelativeTime(new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString())).toBe(
+      '2d ago',
+    );
+  });
+
+  it('falls back to the absolute date+time beyond a week', () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString();
+    expect(formatRelativeTime(tenDaysAgo)).toBe(formatAttemptTimestamp(tenDaysAgo));
   });
 });

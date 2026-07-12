@@ -4,5 +4,6 @@ query Identify($email: String!) {
     fullName
     fingerprintEnrolled
     faceEnrolled
+    registrationStep
   }
 }

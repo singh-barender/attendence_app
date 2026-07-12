@@ -41,6 +41,17 @@ describe('assessEnrollmentQuality', () => {
     expect(result.reason).toBe('no-face');
   });
 
+  it('rejects when more than one face is in frame', () => {
+    const result = assessEnrollmentQuality({ ...GOOD_SAMPLE, faceCount: 2 });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('multiple-faces');
+    expect(result.message).toBeTruthy();
+  });
+
+  it('accepts a single-face capture (faceCount 1)', () => {
+    expect(assessEnrollmentQuality({ ...GOOD_SAMPLE, faceCount: 1 }).accepted).toBe(true);
+  });
+
   it('rejects a too-dark capture', () => {
     const result = assessEnrollmentQuality({
       ...GOOD_SAMPLE,
@@ -82,6 +93,16 @@ describe('assessEnrollmentQuality', () => {
       faceBounds: { x: 300, y: 220, width: tooSmall, height: tooSmall },
     });
     expect(result.reason).toBe('too-small');
+  });
+
+  it('rejects if eyes are closed', () => {
+    const result = assessEnrollmentQuality({
+      ...GOOD_SAMPLE,
+      leftEyeOpen: 0.1,
+      rightEyeOpen: 0.1,
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('eyes-closed');
   });
 
   it('rejects a face that is off-center horizontally', () => {

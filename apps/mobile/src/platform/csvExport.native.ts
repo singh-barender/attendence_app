@@ -1,42 +1,34 @@
 /**
  * CSV export share flow (task 1.20, architecture.md) — fetches the one
- * plain HTTP route this app has (ADR-014), writes the response to a temp
- * file, and opens the native share sheet. Android-only file; a
- * `csvExport.web.ts` counterpart (Phase 3) triggers a browser download
- * instead, since there's neither a native share sheet nor this filesystem
- * API on the web.
+ * plain HTTP route this app has (ADR-014), then hands the response text to
+ * the shared `saveAndShareFile` primitive (task 4.5) rather than
+ * duplicating the file-write/share-sheet mechanism here. Android-only
+ * file; a `csvExport.web.ts` counterpart (Phase 3) triggers a browser
+ * download instead, since there's neither a native share sheet nor a
+ * filesystem API on the web.
  */
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+
 import { loadToken } from '../services/tokenStorage';
 import { getApiUrl } from '../utils/apiUrl';
 import { formatBearerHeader } from '../utils/authHeader';
-import { EXPORT_FILENAME } from './csvExportConstants';
+import type { DateRangeBounds } from '../utils/dateRange';
+import { buildExportQuery, filenameFromContentDisposition } from './csvExportConstants';
+import { saveAndShareFile } from './fileExport';
 
-export async function exportAttendanceCsv(): Promise<void> {
+export async function exportAttendanceCsv(range: DateRangeBounds = {}): Promise<void> {
   const token = await loadToken();
   if (!token) {
     throw new Error('Check in first — exporting requires an active session.');
   }
 
-  const response = await fetch(`${getApiUrl()}/export/attendance.csv`, {
+  const response = await fetch(`${getApiUrl()}/export/attendance.csv${buildExportQuery(range)}`, {
     headers: { Authorization: formatBearerHeader(token) },
   });
   if (!response.ok) {
     throw new Error(`Export failed (HTTP ${response.status}).`);
   }
   const csvText = await response.text();
+  const filename = filenameFromContentDisposition(response.headers.get('content-disposition'));
 
-  const file = new File(Paths.cache, EXPORT_FILENAME);
-  file.create({ overwrite: true });
-  file.write(csvText);
-
-  const isSharingAvailable = await Sharing.isAvailableAsync();
-  if (!isSharingAvailable) {
-    throw new Error('Sharing is not available on this device.');
-  }
-  await Sharing.shareAsync(file.uri, {
-    mimeType: 'text/csv',
-    dialogTitle: 'Export Attendance CSV',
-  });
+  await saveAndShareFile(csvText, filename, 'text/csv');
 }

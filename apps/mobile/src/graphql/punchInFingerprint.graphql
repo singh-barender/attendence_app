@@ -1,5 +1,10 @@
-mutation PunchInFingerprint($userId: ID!, $latitude: Float, $longitude: Float) {
-  punchInFingerprint(userId: $userId, latitude: $latitude, longitude: $longitude) {
+mutation PunchInFingerprint($userId: ID!, $latitude: Float, $longitude: Float, $address: String) {
+  punchInFingerprint(
+    userId: $userId
+    latitude: $latitude
+    longitude: $longitude
+    address: $address
+  ) {
     matched
     bestScore
     type
@@ -13,6 +18,7 @@ mutation PunchInFingerprint($userId: ID!, $latitude: Float, $longitude: Float) {
       matchScore
       latitude
       longitude
+      address
     }
   }
 }

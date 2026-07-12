@@ -36,6 +36,14 @@ describe('assessLiveAlignment', () => {
     expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, yawAngle: null })).toBe(false);
   });
 
+  it('rejects when more than one face is in frame', () => {
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, faceCount: 2 })).toBe(false);
+  });
+
+  it('rejects an occluded frame', () => {
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, isOccluded: true })).toBe(false);
+  });
+
   it('rejects a face that is too small', () => {
     expect(
       assessLiveAlignment({

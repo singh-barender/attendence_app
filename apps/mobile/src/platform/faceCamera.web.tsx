@@ -14,7 +14,12 @@ import type {
   FaceCameraViewProps,
   LiveFaceInfo,
 } from './faceCameraTypes';
-import { eyeOpenProbabilityFrom, yawDegreesFrom } from './humanFaceExtraction.web';
+import {
+  eyeOpenProbabilityFrom,
+  pitchDegreesFrom,
+  smileProbabilityFrom,
+  yawDegreesFrom,
+} from './humanFaceExtraction.web';
 import { getHuman } from './humanInstance.web';
 import { measureImageQuality } from './imageQualitySignals.web';
 
@@ -30,29 +35,38 @@ const DETECTION_INTERVAL_MS = 150;
 
 function faceResultToLiveInfo(
   face: FaceResult | undefined,
+  faceCount: number,
   frameWidth: number,
   frameHeight: number,
 ): LiveFaceInfo {
   if (!face) {
     return {
       hasFace: false,
+      faceCount,
       bounds: null,
       frameWidth,
       frameHeight,
       yawAngle: null,
       leftEyeOpen: null,
       rightEyeOpen: null,
+      smileProbability: null,
+      pitchAngle: null,
+      isOccluded: false,
     };
   }
   const [x, y, width, height] = face.box;
   return {
     hasFace: true,
+    faceCount,
     bounds: { x, y, width, height },
     frameWidth,
     frameHeight,
     yawAngle: yawDegreesFrom(face),
     leftEyeOpen: eyeOpenProbabilityFrom(face, 'leftEyeUpper0', 'leftEyeLower0'),
     rightEyeOpen: eyeOpenProbabilityFrom(face, 'rightEyeUpper0', 'rightEyeLower0'),
+    smileProbability: smileProbabilityFrom(face),
+    pitchAngle: pitchDegreesFrom(face),
+    isOccluded: false,
   };
 }
 
@@ -171,7 +185,12 @@ export const FaceCameraView = forwardRef<
           const face = result.face[0];
           latestFaceRef.current = face;
           onFrameRef.current(
-            faceResultToLiveInfo(face, currentVideo.videoWidth, currentVideo.videoHeight),
+            faceResultToLiveInfo(
+              face,
+              result.face.length,
+              currentVideo.videoWidth,
+              currentVideo.videoHeight,
+            ),
           );
         } catch {
           // A single bad frame isn't fatal — skip it and let the next

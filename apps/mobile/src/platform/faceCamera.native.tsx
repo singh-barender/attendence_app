@@ -80,15 +80,23 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
     });
     const latestFaceInfoRef = useRef<LiveFaceInfo>({
       hasFace: false,
+      faceCount: 0,
       bounds: null,
       frameWidth: 0,
       frameHeight: 0,
       yawAngle: null,
       leftEyeOpen: null,
       rightEyeOpen: null,
+      smileProbability: null,
+      pitchAngle: null,
+      isOccluded: false,
     });
 
-    const faceDetector = useFaceDetector({ performanceMode: 'fast', runClassifications: true });
+    const faceDetector = useFaceDetector({
+      performanceMode: 'fast',
+      runClassifications: true,
+      runLandmarks: true,
+    });
 
     function recordFrameSeen(info: LiveFaceInfo) {
       latestFaceInfoRef.current = info;
@@ -119,24 +127,41 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
         const isRotated90 = frame.orientation === 'left' || frame.orientation === 'right';
         const frameWidth = isRotated90 ? frame.height : frame.width;
         const frameHeight = isRotated90 ? frame.width : frame.height;
+        // Occlusion = the *lower* face (mouth + nose) is missing, which is what
+        // a hand or mask covering the face actually hides. Deliberately does
+        // NOT include the eye landmarks: a genuine left/right profile shot
+        // legitimately loses the far eye, so keying occlusion off the eyes
+        // would falsely flag every profile and block profile enrollment.
+        const isOccluded = firstFace
+          ? !firstFace.landmarks?.MOUTH_BOTTOM || !firstFace.landmarks?.NOSE_BASE
+          : false;
+
         const info: LiveFaceInfo = firstFace
           ? {
               hasFace: true,
+              faceCount: faces.length,
               bounds: firstFace.bounds,
               frameWidth,
               frameHeight,
-              yawAngle: firstFace.yawAngle,
+              yawAngle: firstFace.yawAngle ?? null,
               leftEyeOpen: firstFace.leftEyeOpenProbability ?? null,
               rightEyeOpen: firstFace.rightEyeOpenProbability ?? null,
+              smileProbability: firstFace.smilingProbability ?? null,
+              pitchAngle: firstFace.pitchAngle ?? null,
+              isOccluded,
             }
           : {
               hasFace: false,
+              faceCount: 0,
               bounds: null,
               frameWidth,
               frameHeight,
               yawAngle: null,
               leftEyeOpen: null,
               rightEyeOpen: null,
+              smileProbability: null,
+              pitchAngle: null,
+              isOccluded: false,
             };
         scheduleOnRN(recordFrameSeen, info);
         frame.dispose();

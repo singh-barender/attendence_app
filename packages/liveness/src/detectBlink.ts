@@ -41,9 +41,13 @@ function averageEyeOpenProbability(sample: LivenessSample): number | null {
  * liveness (a photo could simply show closed eyes), and a close that never
  * recovers isn't a completed blink.
  */
-export function detectBlink(samples: readonly LivenessSample[]): BlinkDetectionResult {
-  let sawOpenBeforeClose = false;
-  let sawClosedAfterOpen = false;
+export function detectBlink(
+  samples: readonly LivenessSample[],
+  requiredCount = 1,
+): BlinkDetectionResult {
+  let sawOpen = false;
+  let sawClosed = false;
+  let blinks = 0;
 
   for (const sample of samples) {
     const probability = averageEyeOpenProbability(sample);
@@ -51,22 +55,27 @@ export function detectBlink(samples: readonly LivenessSample[]): BlinkDetectionR
       continue;
     }
 
-    if (!sawOpenBeforeClose) {
+    if (!sawOpen) {
       if (probability >= EYE_OPEN_PROBABILITY) {
-        sawOpenBeforeClose = true;
+        sawOpen = true;
       }
       continue;
     }
 
-    if (!sawClosedAfterOpen) {
+    if (!sawClosed) {
       if (probability <= EYE_CLOSED_PROBABILITY) {
-        sawClosedAfterOpen = true;
+        sawClosed = true;
       }
       continue;
     }
 
     if (probability >= EYE_OPEN_PROBABILITY) {
-      return { detected: true };
+      blinks++;
+      if (blinks >= requiredCount) {
+        return { detected: true };
+      }
+      // Reset state for the next blink
+      sawClosed = false;
     }
   }
 

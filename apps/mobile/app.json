@@ -1,18 +1,16 @@
 {
   "expo": {
-    "name": "Attendance",
+    "name": "Attendence App",
     "slug": "attendance-app",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.attendanceapp.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/favicon.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -24,7 +22,13 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-location", "expo-secure-store", "expo-sharing"],
+    "plugins": [
+      "expo-location",
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-notifications",
+      "expo-background-task"
+    ],
     "extra": {
       "eas": {
         "projectId": "4cc444dc-9106-41fe-b9c4-aba57ba39459"

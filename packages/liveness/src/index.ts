@@ -2,6 +2,8 @@
 
 export { detectBlink, EYE_CLOSED_PROBABILITY, EYE_OPEN_PROBABILITY } from './detectBlink.js';
 export { detectHeadTurn, HEAD_TURN_MIN_DEGREES } from './detectHeadTurn.js';
+export { detectNod, NOD_PITCH_DEGREES } from './detectNod.js';
+export { detectSmile, SMILE_PROBABILITY_THRESHOLD } from './detectSmile.js';
 export type {
   BlinkDetectionResult,
   HeadTurnDetectionResult,
@@ -9,4 +11,6 @@ export type {
   LivenessChallengeResult,
   LivenessChallengeType,
   LivenessSample,
+  NodDetectionResult,
+  SmileDetectionResult,
 } from './types.js';
