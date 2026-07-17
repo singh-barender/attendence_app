@@ -1,0 +1,40 @@
+mutation PunchInFace(
+  $userId: ID!
+  $embedding: [Float!]!
+  $embeddingModel: EmbeddingModel!
+  $livenessChallengeType: LivenessChallengeType!
+  $livenessSamples: [LivenessSampleInput!]!
+  $idempotencyKey: String
+  $clientTimestamp: DateTime
+  $latitude: Float
+  $longitude: Float
+  $address: String
+) {
+  punchInFace(
+    userId: $userId
+    embedding: $embedding
+    embeddingModel: $embeddingModel
+    livenessChallengeType: $livenessChallengeType
+    livenessSamples: $livenessSamples
+    idempotencyKey: $idempotencyKey
+    clientTimestamp: $clientTimestamp
+    latitude: $latitude
+    longitude: $longitude
+    address: $address
+  ) {
+    matched
+    bestScore
+    type
+    record {
+      id
+      date
+      type
+      method
+      timestamp
+      matchScore
+      latitude
+      longitude
+      address
+    }
+  }
+}

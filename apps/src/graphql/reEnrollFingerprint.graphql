@@ -1,0 +1,6 @@
+mutation ReEnrollFingerprint($stepUpToken: String!) {
+  reEnrollFingerprint(stepUpToken: $stepUpToken) {
+    faceEnrolled
+    fingerprintEnrolled
+  }
+}

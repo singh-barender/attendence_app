@@ -1,0 +1,162 @@
+// Prisma schema — the single source of truth for data shape (ADR-011's Pothos
+// Prisma plugin generates GraphQL types directly from these models, so there
+// is no separately hand-maintained GraphQL SDL file). SQLite for this POC,
+// with the datasource abstracted so switching to Postgres later is a config
+// change, not a rewrite (ADR-003).
+
+// Prisma 7's client generator requires an explicit local output path (it no
+// longer generates into node_modules/@prisma/client) — see prisma.config.ts
+// for the actual connection URL, which Prisma 7 moved out of this file.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Generates the Prisma<->Pothos type-mapping file the Pothos Prisma plugin
+// needs (ADR-011) — being verified for Prisma 7 compatibility at Phase 1
+// scaffolding time, since this is a very new pairing with no confirmed
+// compatibility statement from either project as of 2026-07-08.
+//
+// clientOutput MUST be set explicitly: without it, this generator bakes an
+// absolute machine-specific filesystem path into the generated file's import
+// statement (a real bug, reproduced during this project's own scaffolding —
+// see decisions.md). "./prisma" is relative to this generator's own output
+// file, both of which land as siblings under src/generated/.
+generator pothos {
+  provider     = "prisma-pothos-types"
+  output       = "../src/generated/pothos-prisma-types.ts"
+  clientOutput = "./prisma/client.js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id               String   @id @default(uuid())
+  fullName         String
+  email            String   @unique
+  age              Int?
+  gender           String?
+  // bcrypt hash of the account password (ADR-030). Nullable only so the
+  // migration is trivial on a fresh DB — the registration path always sets
+  // it, and login rejects an account with none. Never the plaintext; never
+  // logged. Password authenticates *dashboard access*; the biometric punch
+  // (face/fingerprint) remains the attendance event and its own security
+  // boundary (ADR-004's re-verification stance is unchanged for punches).
+  passwordHash     String?
+  registrationStep Int      @default(1) // 1|2|3 — resumable registration wizard
+  createdAt        DateTime @default(now())
+
+  enrollments          BiometricEnrollment[]
+  attendance           AttendanceRecord[]
+  verificationAttempts VerificationAttempt[]
+}
+
+model BiometricEnrollment {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // "FACE_LEFT" | "FACE_RIGHT" | "FACE_FRONTAL" | "FINGERPRINT_FLAG"
+  embedding String? // JSON-stringified Float32 array; null for FINGERPRINT_FLAG
+  // Which model produced this embedding — "MOBILEFACENET_128" (Android) or
+  // "HUMAN_FACERES" (web); null for FINGERPRINT_FLAG rows (architecture-
+  // review-2026-07-16.md's F3). The two models are independently-trained
+  // and produce incompatible embedding spaces (ADR-006) — matching must
+  // only ever compare embeddings tagged with the same model
+  // (enrollmentService.getFaceEmbeddings filters on this). Existing rows
+  // predating this column are backfilled to MOBILEFACENET_128, accurate
+  // for this project's Android-first testing to date (CLAUDE.md).
+  embeddingModel String?
+  imageUri  String? // optional reference image path, for audit/debugging
+  createdAt DateTime @default(now())
+  // Set when re-enrollment (ADR-018) supersedes this row with a fresh one;
+  // null means "currently active." Rows are never deleted, only superseded,
+  // so past enrollments stay available for audit — but matching/status
+  // logic (enrollmentService.getFaceEmbeddings/getEnrollmentStatus) must
+  // only ever consider the active (supersededAt: null) set.
+  supersededAt DateTime?
+
+  @@index([userId])
+}
+
+model AttendanceRecord {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       String // YYYY-MM-DD, for easy per-day grouping (ADR-016)
+  type       String // "CHECK_IN" | "CHECK_OUT" — server-inferred, not client-supplied (ADR-016)
+  // The *effective* punch time (a follow-up review finding on offline sync
+  // date-drift, round 2): the client's own claimed timestamp when present
+  // and plausible (`resolvePunchTimestamp`), server-received time otherwise
+  // — never literally "whenever the server happened to receive this
+  // request." Everything user-facing reads this: displayed check-in/out
+  // clock times, CSV export, the session timer, and `hoursWorked`/`isLate`
+  // in attendanceReportingService.ts. `@default(now())` stays as a harmless
+  // DB-level safety net; application code always supplies this explicitly.
+  timestamp  DateTime @default(now())
+  // The true server-receipt instant, always — a hidden, never-exposed-via-
+  // GraphQL forensic fact kept separately once `timestamp` above started
+  // trusting the client's claim for user-facing purposes. Not used by any
+  // current feature; exists purely as low-cost insurance in case a punch's
+  // claimed vs. actual-receipt time ever needs reconciling.
+  serverReceivedAt DateTime @default(now())
+  method     String // "FINGERPRINT" | "FACE"
+  matchScore Float? // cosine similarity, FACE only — audit trail
+  latitude   Float? // nullable — a denied location permission must not block punch-in (ADR-016)
+  longitude  Float?
+  // Human-readable place name ("area/landmark, city") resolved client-side at
+  // punch time (Nominatim, one lookup per punch — never bulk server-side, which
+  // would violate its usage policy + ADR-015). Cosmetic metadata only: the
+  // server never trusts it for any decision. Nullable — offline/denied-location/
+  // failed-lookup punches (and every record predating this column) have none.
+  address    String?
+  // Client-generated, one per punch *attempt* (architecture-review-2026-07-16
+  // .md's F7) — a retried offline mutation that actually already succeeded
+  // server-side (response lost in transit, not "never sent") reuses the same
+  // key on resume, so `recordPunch` can recognize and return the original
+  // result instead of re-running type-inference and silently recording the
+  // wrong punch type. Nullable for rows predating this column and for any
+  // caller that doesn't supply one.
+  idempotencyKey String? @unique
+
+  // Punch-type inference and the duplicate-punch guard both query "this user's
+  // records for today" (ADR-016) — indexed for that lookup. The unique
+  // constraint is the DB-level backstop for the same guard: the application
+  // check alone has a race window between two concurrent requests for the
+  // same user/day/type; this makes a duplicate impossible even then.
+  @@index([userId, date])
+  @@unique([userId, date, type])
+}
+
+model VerificationAttempt {
+  // Logs every face/fingerprint verification attempt, success AND failure —
+  // not just successful punches (ADR-019). userId is nullable because a
+  // failed `identify` lookup may not resolve to a known account.
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method     String // "FINGERPRINT" | "FACE"
+  outcome    String // "SUCCESS" | "FAILURE"
+  matchScore Float? // face only
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Tokens revoked before their natural expiry (architecture-review-2026-07-16
+// .md's F8, extended to step-up tokens too) — written by `logout` (session
+// tokens) and by a successful reEnrollFace/reEnrollFingerprint (step-up
+// tokens, single-use consumption). No relation to User: a revoked token
+// outliving its own account (deleted separately) is harmless trivia, not
+// worth a cascade for this scope. `expiresAt` is the revoked token's own JWT
+// `exp`, not `revokedAt` — once past that timestamp, the token could never
+// have been accepted anyway (expired), so the row is safe to sweep. There's
+// no cron in this single-instance POC (ADR-015's zero-infra stance), so
+// `revokeToken` opportunistically deletes past-due rows itself whenever it
+// runs, keeping the table bounded without a background job.
+model RevokedToken {
+  jti       String   @id
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+}

@@ -1,9 +1,0 @@
-query Identify($email: String!) {
-  identify(email: $email) {
-    userId
-    fullName
-    fingerprintEnrolled
-    faceEnrolled
-    registrationStep
-  }
-}

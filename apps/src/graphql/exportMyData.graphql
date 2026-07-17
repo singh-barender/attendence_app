@@ -1,0 +1,34 @@
+query ExportMyData {
+  exportMyData {
+    profile {
+      fullName
+      email
+      age
+      gender
+      createdAt
+      registrationStep
+    }
+    enrollments {
+      type
+      createdAt
+      supersededAt
+    }
+    attendanceRecords {
+      id
+      date
+      type
+      method
+      timestamp
+      matchScore
+      latitude
+      longitude
+    }
+    verificationAttempts {
+      id
+      method
+      outcome
+      matchScore
+      timestamp
+    }
+  }
+}

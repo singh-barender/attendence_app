@@ -1,0 +1,14 @@
+mutation ReEnrollFace(
+  $embeddings: FaceEmbeddingsInput!
+  $embeddingModel: EmbeddingModel!
+  $stepUpToken: String!
+) {
+  reEnrollFace(
+    embeddings: $embeddings
+    embeddingModel: $embeddingModel
+    stepUpToken: $stepUpToken
+  ) {
+    faceEnrolled
+    fingerprintEnrolled
+  }
+}

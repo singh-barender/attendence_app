@@ -1,0 +1,6 @@
+mutation RegisterStep3($embeddings: FaceEmbeddingsInput!, $embeddingModel: EmbeddingModel!) {
+  registerStep3(embeddings: $embeddings, embeddingModel: $embeddingModel) {
+    id
+    registrationStep
+  }
+}

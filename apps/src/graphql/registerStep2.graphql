@@ -1,0 +1,6 @@
+mutation RegisterStep2($fingerprintConfirmed: Boolean!) {
+  registerStep2(fingerprintConfirmed: $fingerprintConfirmed) {
+    id
+    registrationStep
+  }
+}

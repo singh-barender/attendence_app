@@ -1,6 +1,0 @@
-mutation ReEnrollFace($embeddings: FaceEmbeddingsInput!) {
-  reEnrollFace(embeddings: $embeddings) {
-    faceEnrolled
-    fingerprintEnrolled
-  }
-}

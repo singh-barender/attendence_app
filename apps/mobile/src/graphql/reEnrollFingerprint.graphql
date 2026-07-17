@@ -1,6 +1,0 @@
-mutation ReEnrollFingerprint {
-  reEnrollFingerprint {
-    faceEnrolled
-    fingerprintEnrolled
-  }
-}

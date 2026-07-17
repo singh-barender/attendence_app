@@ -1,0 +1,5 @@
+-- CreateTable
+CREATE TABLE "RevokedToken" (
+    "jti" TEXT NOT NULL PRIMARY KEY,
+    "revokedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
