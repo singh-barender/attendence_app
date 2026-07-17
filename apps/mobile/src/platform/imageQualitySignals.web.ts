@@ -29,14 +29,50 @@ function toLuma(r: number, g: number, b: number): number {
  * native resolution.
  */
 export function measureImageQuality(canvas: HTMLCanvasElement): ImageQualitySignal {
+  return measureCanvasRegionQuality(canvas, {
+    x: 0,
+    y: 0,
+    width: canvas.width,
+    height: canvas.height,
+  });
+}
+
+/**
+ * Measures brightness/sharpness from only a region of a captured canvas
+ * (face-verification-pipeline-review-2026-07-16.md's finding) — a
+ * whole-frame average can read as normally-exposed while a backlit
+ * subject's face is silhouetted and unusably dark, since a bright
+ * background pulls the average up. `measureImageQuality` above is this
+ * function applied to the whole canvas as its region, so the two never
+ * drift into two different measurement approaches.
+ */
+export function measureCanvasRegionQuality(
+  canvas: HTMLCanvasElement,
+  region: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  },
+): ImageQualitySignal {
   const downscaled = document.createElement('canvas');
   downscaled.width = QUALITY_CHECK_SIZE;
   downscaled.height = QUALITY_CHECK_SIZE;
   const ctx = downscaled.getContext('2d');
-  if (!ctx) {
+  if (!ctx || region.width <= 0 || region.height <= 0) {
     return { averageBrightness: 0, sharpnessScore: 0 };
   }
-  ctx.drawImage(canvas, 0, 0, QUALITY_CHECK_SIZE, QUALITY_CHECK_SIZE);
+  ctx.drawImage(
+    canvas,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    QUALITY_CHECK_SIZE,
+    QUALITY_CHECK_SIZE,
+  );
   const imageData = ctx.getImageData(0, 0, QUALITY_CHECK_SIZE, QUALITY_CHECK_SIZE);
   return measureImageDataQuality(imageData);
 }

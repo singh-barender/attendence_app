@@ -35,6 +35,11 @@ export interface LiveFaceInfo {
   readonly smileProbability: number | null;
   readonly pitchAngle: number | null;
   readonly isOccluded: boolean;
+  /** Frame-space position of the mouth-bottom landmark, when reported —
+   * feeds the post-capture mouth-region texture check (see
+   * `CapturedFace.mouthRegionSharpnessRatio`). Native (ML Kit) only; web
+   * reports `null` and that check simply never fires there. */
+  readonly mouthBottom: { readonly x: number; readonly y: number } | null;
 }
 
 /**
@@ -53,6 +58,48 @@ export interface CapturedFace<TImage> {
   readonly averageBrightness: number;
   readonly sharpnessScore: number;
   readonly previewUri: string;
+  /**
+   * Local texture-detail ratio at the detected mouth position, relative to
+   * the whole face's own sharpness (both from `measureImageQuality`'s
+   * existing luma-variance measure — no new pixel-processing primitive, just
+   * applied to a smaller region) — a hand/object flat against the lens in
+   * front of the mouth reads as markedly *smoother* than the rest of a real
+   * face, which reliably has texture there (lips, philtrum, facial hair).
+   * `null` when no mouth landmark was available (e.g. web, or a live face
+   * lost between the guide and the shutter) — that check is then skipped
+   * rather than treated as a rejection.
+   */
+  readonly mouthRegionSharpnessRatio: number | null;
+  /**
+   * Whether a dedicated hand/palm detector (ADR-031) found a hand near the
+   * face at capture time — a genuinely different signal from
+   * `mouthRegionSharpnessRatio`/ML Kit's own landmarks, added after those
+   * proved unable to reliably tell a real mouth from a hand covering it.
+   * Always `false` on web (no equivalent detector wired up there), which
+   * simply means that check never fires rather than being treated as a
+   * detected hand.
+   */
+  readonly handDetected: boolean;
+  /**
+   * Presence/geometry/eye/occlusion signals derived from the SAME instant as
+   * `image` above, not a preceding live-preview frame. Native re-runs face
+   * detection against the actual captured photo (`capturedPhotoFaceDetection.native.ts`)
+   * specifically because the live-frame detector driving the on-screen guide
+   * can be a real shutter-latency's worth of time stale by the moment a photo
+   * is actually written — a blink or a hand moving into frame during that gap
+   * was previously invisible to the quality gate, which judged a different
+   * moment in time than the photo it was accepting. Web reuses its own
+   * already-fresh live detection (its capture() has no comparable shutter
+   * latency to be stale across).
+   */
+  readonly hasFace: boolean;
+  readonly faceCount: number;
+  readonly faceBounds: FaceBounds | null;
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  readonly leftEyeOpen: number | null;
+  readonly rightEyeOpen: number | null;
+  readonly isOccluded: boolean;
 }
 
 export interface FaceCameraViewHandle<TImage> {

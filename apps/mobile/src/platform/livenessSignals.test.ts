@@ -17,6 +17,7 @@ const NO_FACE: LiveFaceInfo = {
   smileProbability: null,
   pitchAngle: null,
   isOccluded: false,
+  mouthBottom: null,
 };
 
 /** Builds a LiveFaceInfo fixture, overriding only the fields a test cares about. */

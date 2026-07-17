@@ -3,8 +3,10 @@ import {
   assessEnrollmentQuality,
   MAX_BRIGHTNESS,
   MAX_CENTER_OFFSET_RATIO,
+  MAX_FACE_SIZE_RATIO,
   MIN_BRIGHTNESS,
   MIN_FACE_SIZE_RATIO,
+  MIN_MOUTH_SHARPNESS_RATIO,
   MIN_SHARPNESS_SCORE,
 } from './enrollmentQuality';
 
@@ -46,6 +48,22 @@ describe('assessEnrollmentQuality', () => {
     expect(result.accepted).toBe(false);
     expect(result.reason).toBe('multiple-faces');
     expect(result.message).toBeTruthy();
+  });
+
+  it('rejects when a hand/object is detected near the face, taking priority over other checks', () => {
+    const result = assessEnrollmentQuality({
+      ...GOOD_SAMPLE,
+      handDetected: true,
+      averageBrightness: 0, // also too-dark — hand-detected must still win
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('hand-detected');
+    expect(result.message).toBeTruthy();
+  });
+
+  it('accepts when handDetected is false/omitted', () => {
+    expect(assessEnrollmentQuality({ ...GOOD_SAMPLE, handDetected: false }).accepted).toBe(true);
+    expect(assessEnrollmentQuality(GOOD_SAMPLE).accepted).toBe(true);
   });
 
   it('accepts a single-face capture (faceCount 1)', () => {
@@ -95,6 +113,30 @@ describe('assessEnrollmentQuality', () => {
     expect(result.reason).toBe('too-small');
   });
 
+  it('rejects a face that is too close (fills more than the max frame ratio)', () => {
+    const shorterSide = Math.min(FRAME_WIDTH, FRAME_HEIGHT);
+    const tooClose = Math.ceil(shorterSide * MAX_FACE_SIZE_RATIO) + 1;
+    const x = (FRAME_WIDTH - tooClose) / 2;
+    const y = (FRAME_HEIGHT - tooClose) / 2;
+    const result = assessEnrollmentQuality({
+      ...GOOD_SAMPLE,
+      faceBounds: { x, y, width: tooClose, height: tooClose },
+    });
+    expect(result.reason).toBe('too-close');
+  });
+
+  it('accepts a face right at the max-size boundary', () => {
+    const shorterSide = Math.min(FRAME_WIDTH, FRAME_HEIGHT);
+    const atLimit = Math.floor(shorterSide * MAX_FACE_SIZE_RATIO);
+    const x = (FRAME_WIDTH - atLimit) / 2;
+    const y = (FRAME_HEIGHT - atLimit) / 2;
+    const result = assessEnrollmentQuality({
+      ...GOOD_SAMPLE,
+      faceBounds: { x, y, width: atLimit, height: atLimit },
+    });
+    expect(result.accepted).toBe(true);
+  });
+
   it('rejects if eyes are closed', () => {
     const result = assessEnrollmentQuality({
       ...GOOD_SAMPLE,
@@ -103,6 +145,27 @@ describe('assessEnrollmentQuality', () => {
     });
     expect(result.accepted).toBe(false);
     expect(result.reason).toBe('eyes-closed');
+  });
+
+  it('rejects when the mouth region is far smoother than the rest of the face (likely a hand/object covering it)', () => {
+    const result = assessEnrollmentQuality({
+      ...GOOD_SAMPLE,
+      mouthRegionSharpnessRatio: MIN_MOUTH_SHARPNESS_RATIO - 0.01,
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('occluded');
+  });
+
+  it('accepts a mouth-region sharpness ratio at/above the floor, and a null ratio (not available)', () => {
+    expect(
+      assessEnrollmentQuality({
+        ...GOOD_SAMPLE,
+        mouthRegionSharpnessRatio: MIN_MOUTH_SHARPNESS_RATIO,
+      }).accepted,
+    ).toBe(true);
+    expect(
+      assessEnrollmentQuality({ ...GOOD_SAMPLE, mouthRegionSharpnessRatio: null }).accepted,
+    ).toBe(true);
   });
 
   it('rejects a face that is off-center horizontally', () => {

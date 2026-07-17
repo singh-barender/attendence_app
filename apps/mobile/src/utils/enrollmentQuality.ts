@@ -36,6 +36,15 @@ export interface EnrollmentQualitySample {
   readonly leftEyeOpen?: number | null;
   readonly rightEyeOpen?: number | null;
   readonly isOccluded?: boolean;
+  /** Mouth-region local sharpness relative to the whole face's own
+   * sharpness (`CapturedFace.mouthRegionSharpnessRatio`) — `null`/omitted
+   * when no mouth landmark was available, in which case this check is
+   * skipped rather than treated as a rejection. */
+  readonly mouthRegionSharpnessRatio?: number | null;
+  /** Whether a dedicated hand/palm detector (ADR-031) found a hand near the
+   * face (`CapturedFace.handDetected`) — `false`/omitted when not checked
+   * (e.g. web), in which case this check simply never rejects. */
+  readonly handDetected?: boolean;
 }
 
 export type EnrollmentQualityRejectionReason =
@@ -45,9 +54,11 @@ export type EnrollmentQualityRejectionReason =
   | 'too-bright'
   | 'too-blurry'
   | 'too-small'
+  | 'too-close'
   | 'off-center'
   | 'eyes-closed'
-  | 'occluded';
+  | 'occluded'
+  | 'hand-detected';
 
 export interface EnrollmentQualityResult {
   readonly accepted: boolean;
@@ -63,8 +74,29 @@ export const MAX_BRIGHTNESS = 220;
 export const MIN_SHARPNESS_SCORE = 4;
 /** Face bounding box must cover at least this fraction of the frame's shorter side to count as "close enough". */
 export const MIN_FACE_SIZE_RATIO = 0.2;
+/** Face bounding box must not exceed this fraction of the frame's shorter
+ * side (face-verification-pipeline-review-2026-07-16.md's finding: only a
+ * *minimum* size was ever checked, with no upper bound at all) — a face
+ * this close is almost certainly clipped at the frame edges and/or too
+ * close for the embedder's expected framing. A reasoned bound, not
+ * empirically tuned: comfortably above `MIN_FACE_SIZE_RATIO` and typical
+ * well-framed captures, comfortably below "the face bounding box has
+ * clearly exceeded the frame." */
+export const MAX_FACE_SIZE_RATIO = 0.9;
 /** Face bounding box center must fall within this fraction of frame width/height from true center. */
 export const MAX_CENTER_OFFSET_RATIO = 0.2;
+/** Below this eye-open probability, an eye counts as closed (or covered) —
+ * shared with the live alignment gate (`liveFaceAlignment.ts`) so the oval
+ * guide's green/red state matches what this post-capture check will actually
+ * accept, rather than the live gate showing "ready" for a frame this check
+ * would go on to reject anyway. */
+export const MIN_EYE_OPEN_PROBABILITY = 0.4;
+/** Below this fraction of the whole face's own sharpness, the mouth-region
+ * patch is considered too smooth to be real facial texture — most likely a
+ * hand/object held flat in front of the mouth rather than skin/lips/facial
+ * hair. See `measureMouthRegionSharpness`'s doc comment for why this exists
+ * alongside (not instead of) the landmark-geometry occlusion check. */
+export const MIN_MOUTH_SHARPNESS_RATIO = 0.35;
 
 const REJECTION_MESSAGES: Record<EnrollmentQualityRejectionReason, string> = {
   'no-face': 'We couldn’t see your face — make sure it’s clearly visible and try again.',
@@ -73,10 +105,12 @@ const REJECTION_MESSAGES: Record<EnrollmentQualityRejectionReason, string> = {
   'too-bright': 'That’s too bright and washed out — move out of direct light and try again.',
   'too-blurry': 'That shot came out blurry — hold still and try again.',
   'too-small': 'Move a little closer so your face fills more of the frame.',
+  'too-close': 'Move back a little so your whole face fits in the frame.',
   'off-center': 'Please keep your face inside the frame and look directly at the camera.',
   'eyes-closed':
     'Your eyes appear to be closed — make sure your eyes are open and clearly visible.',
   occluded: 'Something is covering your face. Please ensure your face is clearly visible.',
+  'hand-detected': 'A hand or object was detected near your face — move it away and try again.',
 };
 
 function reject(reason: EnrollmentQualityRejectionReason): EnrollmentQualityResult {
@@ -96,7 +130,16 @@ export function assessEnrollmentQuality(sample: EnrollmentQualitySample): Enroll
   if (sample.faceCount != null && sample.faceCount > 1) {
     return reject('multiple-faces');
   }
+  if (sample.handDetected) {
+    return reject('hand-detected');
+  }
   if (sample.isOccluded) {
+    return reject('occluded');
+  }
+  if (
+    sample.mouthRegionSharpnessRatio != null &&
+    sample.mouthRegionSharpnessRatio < MIN_MOUTH_SHARPNESS_RATIO
+  ) {
     return reject('occluded');
   }
   if (sample.averageBrightness < MIN_BRIGHTNESS) {
@@ -109,18 +152,23 @@ export function assessEnrollmentQuality(sample: EnrollmentQualitySample): Enroll
     return reject('too-blurry');
   }
 
-  const eyeThreshold = 0.4;
   if (
-    (sample.leftEyeOpen != null && sample.leftEyeOpen < eyeThreshold) ||
-    (sample.rightEyeOpen != null && sample.rightEyeOpen < eyeThreshold)
+    (sample.leftEyeOpen != null && sample.leftEyeOpen < MIN_EYE_OPEN_PROBABILITY) ||
+    (sample.rightEyeOpen != null && sample.rightEyeOpen < MIN_EYE_OPEN_PROBABILITY)
   ) {
     return reject('eyes-closed');
   }
 
   const shorterFrameSide = Math.min(sample.frameWidth, sample.frameHeight);
-  const faceSize = Math.min(sample.faceBounds.width, sample.faceBounds.height);
-  if (shorterFrameSide > 0 && faceSize / shorterFrameSide < MIN_FACE_SIZE_RATIO) {
+  const minFaceSize = Math.min(sample.faceBounds.width, sample.faceBounds.height);
+  if (shorterFrameSide > 0 && minFaceSize / shorterFrameSide < MIN_FACE_SIZE_RATIO) {
     return reject('too-small');
+  }
+  // Uses the LARGER of width/height (not the smaller, as above) so a face
+  // extending past the frame in either axis alone is still caught.
+  const maxFaceSize = Math.max(sample.faceBounds.width, sample.faceBounds.height);
+  if (shorterFrameSide > 0 && maxFaceSize / shorterFrameSide > MAX_FACE_SIZE_RATIO) {
+    return reject('too-close');
   }
 
   const faceCenterX = sample.faceBounds.x + sample.faceBounds.width / 2;

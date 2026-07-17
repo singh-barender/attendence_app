@@ -1,25 +1,23 @@
 /**
- * Native face-camera abstraction (task 3.8, ADR-006) — extracted from
- * Step3FaceEnrollScreen/LoginPunchInScreen's previously-inline
- * react-native-vision-camera + ML Kit frame-processor code (tasks 2.1/2.2)
- * so both screens (and their future web counterparts) share one
- * implementation instead of two independent copies of the same camera
- * wiring. A near-pure extraction, not a redesign — with one deliberate,
- * minor behavior difference: `capture()` always writes its temp preview
- * file (previously only capture attempts the quality gate *accepted* were
- * saved to disk). A capture the caller goes on to reject never has its
- * `previewUri` read, so the extra file is simply unused rather than
- * harmful — accepted as a reasonable tradeoff for `capture()` returning
- * one complete, ready-to-use result rather than exposing a second,
- * platform-specific "now save it" step back up to the (platform-neutral)
- * screen.
+ * Native face-camera abstraction (task 3.8, ADR-006) — shared by
+ * enrollment and verification so neither owns its own copy of the
+ * react-native-vision-camera + ML Kit wiring. `capture()` always writes its
+ * temp preview file, even for a capture the caller goes on to reject; the
+ * file is simply unused in that case, a reasonable tradeoff for one
+ * complete, ready-to-use result.
  *
- * `photo.dispose()` running before the caller uses `capture()`'s returned
- * `image` is safe, not a use-after-free: verified against
- * react-native-vision-camera's own `Photo.nitro.ts` documented example,
- * which explicitly disposes the `Photo` immediately after `toImage()` and
- * continues using the resulting `Image` afterward — `Image` (unlike
- * `Photo`) owns independent native memory once created.
+ * `photo.dispose()` before the caller uses `capture()`'s returned `image`
+ * is safe, not a use-after-free — verified against vision-camera's own
+ * `Photo.nitro.ts` example, which disposes `Photo` right after `toImage()`
+ * and keeps using the resulting `Image` (`Image` owns independent memory).
+ *
+ * The occlusion heuristic (`faceOcclusionHeuristics.ts`), rotation fix
+ * (`photoRotationFix.ts`), mouth-region-sharpness ratio
+ * (`imageQualitySignals.native.ts`), hand-detection check
+ * (`handDetector.native.ts`), and post-capture face re-detection
+ * (`capturedPhotoFaceDetection.native.ts`) all live in their own files —
+ * this component only wires them together (coding-standards.md's "small,
+ * modular, single-responsibility files").
  */
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
@@ -32,40 +30,44 @@ import {
   useFrameOutput,
   usePhotoOutput,
 } from 'react-native-vision-camera';
-import { useFaceDetector } from 'react-native-vision-camera-face-detector';
+import { useFaceDetector, useImageFaceDetector } from 'react-native-vision-camera-face-detector';
 import { scheduleOnRN } from 'react-native-worklets';
-import { mapFaceBoundsToCropRect } from '../utils/faceCrop';
+import { cropToFaceIfKnown } from '../utils/faceCrop';
+import { detectFaceOnCapturedImage } from './capturedPhotoFaceDetection';
 import type {
   CapturedFace,
   FaceCameraViewHandle,
   FaceCameraViewProps,
   LiveFaceInfo,
 } from './faceCameraTypes';
-import { measureImageQuality } from './imageQualitySignals';
+import { computeFaceOcclusion } from './faceOcclusionHeuristics';
+import { checkHandNearFace } from './handDetector';
+import { computeMouthRegionSharpnessRatio, measureImageQuality } from './imageQualitySignals';
+import { correctFrontCameraPhotoRotation } from './photoRotationFix';
+
+/** JPEG quality for the preview thumbnail — a small on-screen preview, not
+ * the embedder's input (which reads the in-memory `Image` directly). */
+const PREVIEW_JPEG_QUALITY = 80;
+
+const EMPTY_FACE_INFO: LiveFaceInfo = {
+  hasFace: false,
+  faceCount: 0,
+  bounds: null,
+  frameWidth: 0,
+  frameHeight: 0,
+  yawAngle: null,
+  leftEyeOpen: null,
+  rightEyeOpen: null,
+  smileProbability: null,
+  pitchAngle: null,
+  isOccluded: false,
+  mouthBottom: null,
+};
 
 export function useFaceCameraPermission() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
   return { hasPermission, requestPermission, hasDevice: device !== undefined };
-}
-
-/** Crops to the live face bounds when known (matching the embedder's
- * expectation of a pre-cropped face); falls back to the uncropped image
- * when bounds are missing — the caller's own quality gate (which also
- * checks `hasFace`/`bounds`) rejects that case anyway, so no crop is ever
- * actually needed for a capture that will be rejected. */
-function cropToFaceIfKnown(image: Image, faceInfo: LiveFaceInfo): Image {
-  if (!faceInfo.bounds) {
-    return image;
-  }
-  const cropRect = mapFaceBoundsToCropRect(
-    faceInfo.bounds,
-    faceInfo.frameWidth,
-    faceInfo.frameHeight,
-    image.width,
-    image.height,
-  );
-  return image.crop(cropRect.startX, cropRect.startY, cropRect.endX, cropRect.endY);
 }
 
 export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCameraViewProps>(
@@ -78,21 +80,17 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
       // the photo's own coordinate space — see utils/faceCrop.ts.
       targetResolution: CommonResolutions.HD_4_3,
     });
-    const latestFaceInfoRef = useRef<LiveFaceInfo>({
-      hasFace: false,
-      faceCount: 0,
-      bounds: null,
-      frameWidth: 0,
-      frameHeight: 0,
-      yawAngle: null,
-      leftEyeOpen: null,
-      rightEyeOpen: null,
-      smileProbability: null,
-      pitchAngle: null,
-      isOccluded: false,
-    });
+    const latestFaceInfoRef = useRef<LiveFaceInfo>(EMPTY_FACE_INFO);
 
     const faceDetector = useFaceDetector({
+      performanceMode: 'fast',
+      runClassifications: true,
+      runLandmarks: true,
+    });
+    // Re-detects against the actual captured photo at capture() time — see
+    // capturedPhotoFaceDetection.native.ts for why the live-frame detector
+    // above isn't sufficient for the eye-openness/occlusion decision.
+    const imageFaceDetector = useImageFaceDetector({
       performanceMode: 'fast',
       runClassifications: true,
       runLandmarks: true,
@@ -115,26 +113,15 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
         'worklet';
         const faces = faceDetector.detectFaces(frame);
         const firstFace = faces[0];
-        // ML Kit's InputImage is built with the frame's rotationDegrees
-        // (see react-native-vision-camera-face-detector's
-        // ML+HybridFrameSpec.kt), so `firstFace.bounds` is already in the
-        // upright/rotated space — but `frame.width`/`frame.height`
-        // deliberately stay in the raw, pre-rotation sensor space (per
-        // Frame.orientation's own docs, physically rotating buffers is
-        // expensive). On a 90°-rotated frame that swap must be mirrored
-        // here, or every downstream consumer (centering checks, the
-        // embedding crop) silently compares bounds against the wrong axis.
+        // ML Kit's InputImage is built with the frame's rotationDegrees, so
+        // `firstFace.bounds` is already upright — but `frame.width`/`height`
+        // deliberately stay in the raw, pre-rotation sensor space (physically
+        // rotating buffers is expensive). On a 90°-rotated frame that swap
+        // must be mirrored, or downstream consumers compare against the wrong axis.
         const isRotated90 = frame.orientation === 'left' || frame.orientation === 'right';
         const frameWidth = isRotated90 ? frame.height : frame.width;
         const frameHeight = isRotated90 ? frame.width : frame.height;
-        // Occlusion = the *lower* face (mouth + nose) is missing, which is what
-        // a hand or mask covering the face actually hides. Deliberately does
-        // NOT include the eye landmarks: a genuine left/right profile shot
-        // legitimately loses the far eye, so keying occlusion off the eyes
-        // would falsely flag every profile and block profile enrollment.
-        const isOccluded = firstFace
-          ? !firstFace.landmarks?.MOUTH_BOTTOM || !firstFace.landmarks?.NOSE_BASE
-          : false;
+        const { isOccluded, mouthBottom } = computeFaceOcclusion(firstFace);
 
         const info: LiveFaceInfo = firstFace
           ? {
@@ -149,20 +136,9 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
               smileProbability: firstFace.smilingProbability ?? null,
               pitchAngle: firstFace.pitchAngle ?? null,
               isOccluded,
+              mouthBottom,
             }
-          : {
-              hasFace: false,
-              faceCount: 0,
-              bounds: null,
-              frameWidth,
-              frameHeight,
-              yawAngle: null,
-              leftEyeOpen: null,
-              rightEyeOpen: null,
-              smileProbability: null,
-              pitchAngle: null,
-              isOccluded: false,
-            };
+          : { ...EMPTY_FACE_INFO, frameWidth, frameHeight };
         scheduleOnRN(recordFrameSeen, info);
         frame.dispose();
       },
@@ -172,17 +148,64 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
       async capture(): Promise<CapturedFace<Image>> {
         const photo = await photoOutput.capturePhoto({}, {});
         try {
-          const faceInfo = latestFaceInfoRef.current;
-          const image = photo.toImage();
-          const { averageBrightness, sharpnessScore } = measureImageQuality(image);
-          const croppedImage = cropToFaceIfKnown(image, faceInfo);
-          const filePath = await photo.saveToTemporaryFileAsync();
+          const rawImage = photo.toImage();
+          const image = correctFrontCameraPhotoRotation(rawImage, photo.orientation);
+
+          // Fresh, photo-derived signals — NOT the live-preview ref — so the
+          // quality decision judges the same instant as the photo it's
+          // deciding on (face-verification-pipeline-review-2026-07-16.md).
+          const freshFace = await detectFaceOnCapturedImage(imageFaceDetector, image);
+
+          const { image: croppedImage, cropRect } = cropToFaceIfKnown(
+            image,
+            freshFace.bounds,
+            freshFace.frameWidth,
+            freshFace.frameHeight,
+          );
+          // Measured on the face-cropped region, not the whole frame
+          // (face-verification-pipeline-review-2026-07-16.md's finding): a
+          // whole-frame average can look normally-exposed while a backlit
+          // subject's face is silhouetted and unusably dark, since a bright
+          // background pulls the average up. Cropping first, same as the
+          // mouth-sharpness/hand-detection checks already do, means exposure
+          // and focus are judged on the part of the photo that actually
+          // matters.
+          const { averageBrightness, sharpnessScore } = measureImageQuality(croppedImage);
+          const previewPath = await croppedImage.saveToTemporaryFileAsync(
+            'jpg',
+            PREVIEW_JPEG_QUALITY,
+          );
+
+          const mouthRegionSharpnessRatio = computeMouthRegionSharpnessRatio(
+            freshFace.mouthBottom,
+            freshFace.frameWidth,
+            freshFace.frameHeight,
+            image,
+            croppedImage,
+            cropRect,
+          );
+          const handDetected = await checkHandNearFace(
+            freshFace.bounds,
+            freshFace.frameWidth,
+            freshFace.frameHeight,
+            image,
+          );
 
           return {
             image: croppedImage,
             averageBrightness,
             sharpnessScore,
-            previewUri: `file://${filePath}`,
+            previewUri: `file://${previewPath}`,
+            mouthRegionSharpnessRatio,
+            handDetected,
+            hasFace: freshFace.hasFace,
+            faceCount: freshFace.faceCount,
+            faceBounds: freshFace.bounds,
+            frameWidth: freshFace.frameWidth,
+            frameHeight: freshFace.frameHeight,
+            leftEyeOpen: freshFace.leftEyeOpen,
+            rightEyeOpen: freshFace.rightEyeOpen,
+            isOccluded: freshFace.isOccluded,
           };
         } finally {
           photo.dispose();

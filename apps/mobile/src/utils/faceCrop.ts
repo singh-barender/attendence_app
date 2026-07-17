@@ -8,6 +8,7 @@
  * position within the frame is the same fractional position within the
  * photo, regardless of the two streams' different absolute resolutions.
  */
+import type { Image } from 'react-native-nitro-image';
 import type { FaceBounds } from './enrollmentQuality';
 
 /**
@@ -25,7 +26,7 @@ export interface CropRect {
   readonly endY: number;
 }
 
-function clamp(value: number, min: number, max: number): number {
+export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
@@ -55,5 +56,55 @@ export function mapFaceBoundsToCropRect(
     startY: clamp(yRatioStart * imageHeight, 0, imageHeight),
     endX: clamp(xRatioEnd * imageWidth, 0, imageWidth),
     endY: clamp(yRatioEnd * imageHeight, 0, imageHeight),
+  };
+}
+
+/**
+ * Maps a single point (e.g. an ML Kit landmark) from `frameWidth` x
+ * `frameHeight` space to `imageWidth` x `imageHeight` space — the
+ * single-point counterpart to `mapFaceBoundsToCropRect`'s box mapping, used
+ * to locate a specific facial landmark (rather than crop to the whole face)
+ * in a separately-captured photo's coordinate space.
+ */
+export function mapFacePointToImageSpace(
+  point: { readonly x: number; readonly y: number },
+  frameWidth: number,
+  frameHeight: number,
+  imageWidth: number,
+  imageHeight: number,
+): { readonly x: number; readonly y: number } {
+  return {
+    x: clamp((point.x / frameWidth) * imageWidth, 0, imageWidth),
+    y: clamp((point.y / frameHeight) * imageHeight, 0, imageHeight),
+  };
+}
+
+/** Crops to the live face bounds when known (matching the embedder's
+ * expectation of a pre-cropped face); falls back to the uncropped image
+ * when bounds are missing — the caller's own quality gate (which also
+ * checks `hasFace`/`bounds`) rejects that case anyway, so no crop is ever
+ * actually needed for a capture that will be rejected. Also returns the crop
+ * rect used (or `null` when uncropped) so the caller can map other
+ * frame-space points — e.g. the mouth landmark — into this same cropped
+ * image's coordinate space without recomputing the mapping. */
+export function cropToFaceIfKnown(
+  image: Image,
+  bounds: FaceBounds | null,
+  frameWidth: number,
+  frameHeight: number,
+): { image: Image; cropRect: CropRect | null } {
+  if (!bounds) {
+    return { image, cropRect: null };
+  }
+  const cropRect = mapFaceBoundsToCropRect(
+    bounds,
+    frameWidth,
+    frameHeight,
+    image.width,
+    image.height,
+  );
+  return {
+    image: image.crop(cropRect.startX, cropRect.startY, cropRect.endX, cropRect.endY),
+    cropRect,
   };
 }

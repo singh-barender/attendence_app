@@ -1,3 +1,4 @@
+import { MAX_FACE_SIZE_RATIO, MIN_EYE_OPEN_PROBABILITY } from './enrollmentQuality';
 import type { LiveAlignmentSample } from './liveFaceAlignment';
 import {
   assessLiveAlignment,
@@ -44,11 +45,46 @@ describe('assessLiveAlignment', () => {
     expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, isOccluded: true })).toBe(false);
   });
 
+  it('rejects when an eye is covered/closed (below the shared open-probability floor)', () => {
+    expect(
+      assessLiveAlignment({ ...FRONTAL_SAMPLE, rightEyeOpen: MIN_EYE_OPEN_PROBABILITY - 0.01 }),
+    ).toBe(false);
+    expect(
+      assessLiveAlignment({ ...FRONTAL_SAMPLE, leftEyeOpen: MIN_EYE_OPEN_PROBABILITY - 0.01 }),
+    ).toBe(false);
+  });
+
+  it('accepts eye-open values at/above the floor, and a null eye value (not yet reported)', () => {
+    expect(
+      assessLiveAlignment({
+        ...FRONTAL_SAMPLE,
+        leftEyeOpen: MIN_EYE_OPEN_PROBABILITY,
+        rightEyeOpen: MIN_EYE_OPEN_PROBABILITY,
+      }),
+    ).toBe(true);
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, leftEyeOpen: null, rightEyeOpen: null })).toBe(
+      true,
+    );
+  });
+
   it('rejects a face that is too small', () => {
     expect(
       assessLiveAlignment({
         ...FRONTAL_SAMPLE,
         faceBounds: { x: 300, y: 220, width: 20, height: 20 },
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects a face that is too close (fills more than the max frame ratio)', () => {
+    const shorterSide = Math.min(FRAME_WIDTH, FRAME_HEIGHT);
+    const tooClose = Math.ceil(shorterSide * MAX_FACE_SIZE_RATIO) + 1;
+    const x = (FRAME_WIDTH - tooClose) / 2;
+    const y = (FRAME_HEIGHT - tooClose) / 2;
+    expect(
+      assessLiveAlignment({
+        ...FRONTAL_SAMPLE,
+        faceBounds: { x, y, width: tooClose, height: tooClose },
       }),
     ).toBe(false);
   });

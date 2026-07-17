@@ -87,6 +87,15 @@ export class LivenessChallengeSession {
   reset(): void {
     this.samples = [];
   }
+
+  /** The current sample window, for the caller to send alongside the punch
+   * mutation so the server can independently re-judge the same challenge
+   * (architecture-review-2026-07-16.md's F1) rather than trusting this
+   * class's own client-side `detected` boolean. A copy, not the live array —
+   * callers must not be able to mutate this session's internal state. */
+  getSamples(): readonly LivenessSample[] {
+    return [...this.samples];
+  }
 }
 
 /**
@@ -110,5 +119,7 @@ export function useLivenessChallenge(type: LivenessChallengeType) {
     setResult(initialResultFor(type));
   }, [type]);
 
-  return { recordFrame, reset, result };
+  const getSamples = useCallback(() => sessionRef.current.getSamples(), []);
+
+  return { recordFrame, reset, result, getSamples };
 }

@@ -1,63 +1,32 @@
 /**
  * Guided left/right/frontal face capture (ADR-006), gated by an enrollment
- * quality check (task 2.7, ADR-018) before a capture is accepted — extracted
- * from Step3FaceEnrollScreen (task 4.2) so registration and profile-screen
- * re-enrollment (`ReEnrollFaceScreen`) share the exact same capture/quality
- * bar rather than a trimmed-down copy for re-enrollment. Owns the camera,
- * quality gate, and embedding computation; the caller owns the actual
- * mutation call and what happens after `onFinish`.
+ * quality check (task 2.7, ADR-018) before a capture is accepted — used by
+ * both registration and profile-screen re-enrollment (`ReEnrollFaceScreen`)
+ * so they share the exact same capture/quality bar rather than a
+ * trimmed-down copy. Owns the camera, quality gate, and embedding
+ * computation; the caller owns the actual mutation call and what happens
+ * after `onFinish`.
  *
- * `FaceCameraView`'s `capture()` already returns a platform-appropriately-
- * prepared image (native: cropped to face bounds; web: the whole frame,
- * since @vladmandic/human's embedder does its own detection/alignment) plus
- * brightness/sharpness signals, so the quality-gate → embed flow below is
- * identical on both platforms (task 3.8).
+ * This component is a thin orchestrator (coding-standards.md's "small,
+ * modular, single-responsibility files") — state/handlers live in
+ * `useFaceEnrollmentCapture`, the live camera view is
+ * `FaceEnrollmentCameraView`, and the captured-thumbnails list is
+ * `CapturedAnglesList`.
  */
-import type { ComponentRef, ReactNode } from 'react';
-import { useRef, useState } from 'react';
-import { Image } from 'react-native';
+import type { ReactNode } from 'react';
 import { Button, Spinner, Text, YStack } from 'tamagui';
 import { useThemePreference } from '../contexts/ThemePreferenceContext';
-import { FaceCameraView, useFaceCameraPermission } from '../platform/faceCamera';
-import { FRAME_STATE_THROTTLE_MS, type LiveFaceInfo } from '../platform/faceCameraTypes';
-import { faceEmbedder } from '../platform/faceEmbedder';
-import { getErrorMessage } from '../services/graphqlError';
+import type { FaceEnrollmentEmbeddings } from '../hooks/useFaceEnrollmentCapture';
+import { useFaceEnrollmentCapture } from '../hooks/useFaceEnrollmentCapture';
+import { useFaceCameraPermission } from '../platform/faceCamera';
 import { GLASS_PALETTES } from '../theme/glassPalette';
-import { assessEnrollmentQuality } from '../utils/enrollmentQuality';
-import { ANGLE_INFO, ANGLES, type Angle } from '../utils/faceAngles';
-import { assessLiveAlignment } from '../utils/liveFaceAlignment';
-import {
-  ALIGNMENT_OVAL_HEIGHT,
-  ALIGNMENT_OVAL_WIDTH,
-  FaceAlignmentMask,
-} from './FaceAlignmentMask';
+import { ANGLES } from '../utils/faceAngles';
+import { CapturedAnglesList } from './CapturedAnglesList';
 import { FaceAngleHint } from './FaceAngleHint';
+import { FaceEnrollmentCameraView } from './FaceEnrollmentCameraView';
 import { FeedbackBanner } from './FeedbackBanner';
 
-export interface FaceEnrollmentEmbeddings {
-  left: number[];
-  right: number[];
-  frontal: number[];
-}
-
-interface AngleCapture {
-  previewUri: string;
-  embedding: number[];
-}
-
-const EMPTY_FACE_INFO: LiveFaceInfo = {
-  hasFace: false,
-  faceCount: 0,
-  bounds: null,
-  frameWidth: 0,
-  frameHeight: 0,
-  yawAngle: null,
-  leftEyeOpen: null,
-  rightEyeOpen: null,
-  smileProbability: null,
-  pitchAngle: null,
-  isOccluded: false,
-};
+export type { FaceEnrollmentEmbeddings };
 
 interface FaceEnrollmentCaptureProps {
   /** Called once all three angles are captured and the user taps Finish —
@@ -83,115 +52,22 @@ export function FaceEnrollmentCapture({
   const { resolvedTheme } = useThemePreference();
   const palette = GLASS_PALETTES[resolvedTheme];
   const { hasPermission, requestPermission, hasDevice } = useFaceCameraPermission();
-  const cameraRef = useRef<ComponentRef<typeof FaceCameraView>>(null);
-  const [photos, setPhotos] = useState<Partial<Record<Angle, AngleCapture>>>({});
-  const [captureError, setCaptureError] = useState<string | null>(null);
-  const [cameraLayoutSize, setCameraLayoutSize] = useState({ width: 0, height: 0 });
-  const [frameStats, setFrameStats] = useState<{ count: number; face: LiveFaceInfo }>({
-    count: 0,
-    face: EMPTY_FACE_INFO,
-  });
-  const totalFramesSeenRef = useRef(0);
-  const lastFrameStatusUpdateRef = useRef(0);
-  const latestFaceInfoRef = useRef<LiveFaceInfo>(EMPTY_FACE_INFO);
-
-  /**
-   * Called on every detected frame by FaceCameraView. `latestFaceInfoRef`
-   * is updated unconditionally so the quality gate always reads fresh
-   * data at capture time; the debug-readout `setFrameStats` call below it
-   * is throttled since re-rendering React state on every frame would be
-   * wasteful.
-   */
-  function handleFrame(info: LiveFaceInfo) {
-    totalFramesSeenRef.current += 1;
-    latestFaceInfoRef.current = info;
-
-    const now = Date.now();
-    if (now - lastFrameStatusUpdateRef.current < FRAME_STATE_THROTTLE_MS) {
-      return;
-    }
-    lastFrameStatusUpdateRef.current = now;
-    setFrameStats({ count: totalFramesSeenRef.current, face: info });
-  }
-
-  const nextAngle = ANGLES.find((angle) => !photos[angle]);
-  const capturedCount = ANGLES.filter((angle) => photos[angle]).length;
-
-  // Drives the live guide overlay/capture gating below — reuses the same
-  // throttled `frameStats` the debug readout already computes, so this
-  // adds no extra per-frame state or re-render pressure.
-  const isAligned = nextAngle
-    ? assessLiveAlignment({
-        hasFace: frameStats.face.hasFace,
-        faceCount: frameStats.face.faceCount,
-        faceBounds: frameStats.face.bounds,
-        frameWidth: frameStats.face.frameWidth,
-        frameHeight: frameStats.face.frameHeight,
-        yawAngle: frameStats.face.yawAngle,
-        minYawDegrees: ANGLE_INFO[nextAngle].minYaw,
-        maxYawDegrees: ANGLE_INFO[nextAngle].maxYaw,
-        isOccluded: frameStats.face.isOccluded,
-      })
-    : false;
-
-  async function handleCapture() {
-    if (!nextAngle) {
-      return;
-    }
-    setCaptureError(null);
-
-    try {
-      const faceInfo = latestFaceInfoRef.current;
-      const captured = await cameraRef.current?.capture();
-      if (!captured) {
-        return;
-      }
-
-      const quality = assessEnrollmentQuality({
-        hasFace: faceInfo.hasFace,
-        faceCount: faceInfo.faceCount,
-        faceBounds: faceInfo.bounds,
-        frameWidth: faceInfo.frameWidth,
-        frameHeight: faceInfo.frameHeight,
-        averageBrightness: captured.averageBrightness,
-        sharpnessScore: captured.sharpnessScore,
-        leftEyeOpen: faceInfo.leftEyeOpen,
-        rightEyeOpen: faceInfo.rightEyeOpen,
-        isOccluded: faceInfo.isOccluded,
-      });
-      if (!quality.accepted || !faceInfo.bounds) {
-        setCaptureError(quality.message ?? 'Capture rejected — please try again.');
-        return;
-      }
-
-      const { embedding } = await faceEmbedder.computeEmbedding(captured.image);
-      setPhotos((prev) => ({
-        ...prev,
-        [nextAngle]: { previewUri: captured.previewUri, embedding },
-      }));
-    } catch (err) {
-      setCaptureError(getErrorMessage(err, 'Failed to capture photo.'));
-    }
-  }
-
-  function handleRetake(angle: Angle) {
-    setPhotos((prev) => {
-      const next = { ...prev };
-      delete next[angle];
-      return next;
-    });
-  }
-
-  function handleFinish() {
-    if (!photos.left || !photos.right || !photos.frontal) {
-      return;
-    }
-    onFinish({
-      left: photos.left.embedding,
-      right: photos.right.embedding,
-      frontal: photos.frontal.embedding,
-    });
-  }
+  const {
+    cameraRef,
+    photos,
+    captureError,
+    setCaptureError,
+    cameraLayoutSize,
+    setCameraLayoutSize,
+    frameStats,
+    nextAngle,
+    capturedCount,
+    isAligned,
+    handleFrame,
+    handleCapture,
+    handleRetake,
+    handleFinish,
+  } = useFaceEnrollmentCapture(onFinish);
 
   if (!hasPermission) {
     return (
@@ -228,121 +104,22 @@ export function FaceEnrollmentCapture({
       </Text>
 
       {nextAngle ? (
-        <>
-          <Text
-            style={{
-              color: frameStats.face.isOccluded ? palette.danger : palette.ink,
-              fontWeight: '600',
-            }}
-          >
-            {frameStats.face.isOccluded
-              ? 'Something is covering your face. Please ensure your face is clearly visible.'
-              : ANGLE_INFO[nextAngle].instruction}
-          </Text>
-          <YStack
-            onLayout={(event) => {
-              const { width, height } = event.nativeEvent.layout;
-              setCameraLayoutSize({ width, height });
-            }}
-            style={{
-              height: 320,
-              overflow: 'hidden',
-              borderRadius: 12,
-              position: 'relative',
-              borderWidth: 1,
-              borderColor: palette.glassBorder,
-            }}
-          >
-            <FaceCameraView
-              ref={cameraRef}
-              onFrame={handleFrame}
-              onError={(err) => setCaptureError(getErrorMessage(err, 'Camera error.'))}
-            />
-            {/* Blurs everything outside the alignment oval's bounding box so
-                attention goes to the one region a face needs to sit in,
-                rather than an equally-sharp full-frame preview — turns the
-                oval's border green once assessLiveAlignment (same size/
-                centering thresholds as the post-capture gate, plus a yaw
-                check for the requested angle) is satisfied, so the user
-                gets steering feedback before tapping Capture instead of
-                only a rejection message after. */}
-            <FaceAlignmentMask
-              containerWidth={cameraLayoutSize.width}
-              containerHeight={cameraLayoutSize.height}
-              ovalWidth={ALIGNMENT_OVAL_WIDTH}
-              ovalHeight={ALIGNMENT_OVAL_HEIGHT}
-              isAligned={isAligned}
-              palette={palette}
-            />
-          </YStack>
-          {/* Developer-only frame-pipeline readout (frame count, resolution,
-              face presence, eye/yaw signals) — invaluable while debugging the
-              detection pipeline on-device, but noise to a real user, so it's
-              gated to __DEV__ builds and never ships in production. */}
-          {__DEV__ && frameStats.count > 0 ? (
-            <Text style={{ color: palette.inkSoft }} fontSize="$1">
-              Frame pipeline: {frameStats.count} frames seen ({frameStats.face.frameWidth}x
-              {frameStats.face.frameHeight}) — {frameStats.face.hasFace ? '1' : '0'} face(s)
-              {frameStats.face.hasFace ? (
-                <>
-                  {' '}
-                  (eyes: L {frameStats.face.leftEyeOpen?.toFixed(2) ?? '—'} R{' '}
-                  {frameStats.face.rightEyeOpen?.toFixed(2) ?? '—'}, yaw:{' '}
-                  {frameStats.face.yawAngle?.toFixed(1) ?? '—'}°)
-                </>
-              ) : null}
-            </Text>
-          ) : null}
-          <Button
-            onPress={handleCapture}
-            disabled={!isAligned}
-            mt="$2"
-            style={{ backgroundColor: isAligned ? palette.accent : undefined }}
-          >
-            <Text
-              style={{
-                color: isAligned ? palette.accentInk : palette.inkSoft,
-                fontWeight: '700',
-              }}
-            >
-              {isAligned
-                ? `Capture ${ANGLE_INFO[nextAngle].label}`
-                : 'Align your face in the frame'}
-            </Text>
-          </Button>
-        </>
+        <FaceEnrollmentCameraView
+          nextAngle={nextAngle}
+          frameStats={frameStats}
+          cameraRef={cameraRef}
+          onFrame={handleFrame}
+          onCameraError={setCaptureError}
+          cameraLayoutSize={cameraLayoutSize}
+          onCameraLayout={setCameraLayoutSize}
+          isAligned={isAligned}
+          onCapture={handleCapture}
+        />
       ) : (
         <FeedbackBanner variant="success" message="All three angles captured." />
       )}
 
-      <YStack gap="$2">
-        {ANGLES.map((angle) =>
-          photos[angle] ? (
-            <YStack key={angle} gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {/* React Native's own Image (not Tamagui's) renders the
-                  captured `file://` (native) / `data:` (web) preview reliably;
-                  Tamagui's Image was leaving these local-URI thumbnails
-                  blank. The palette-tinted background is a visible placeholder
-                  so the slot reads as an image frame even while it decodes. */}
-              <Image
-                source={{ uri: photos[angle].previewUri }}
-                style={{
-                  width: 60,
-                  height: 60,
-                  borderRadius: 8,
-                  backgroundColor: palette.glassBorder,
-                }}
-              />
-              <Text style={{ color: palette.ink }} flex={1}>
-                {ANGLE_INFO[angle].label}
-              </Text>
-              <Button size="$2" onPress={() => handleRetake(angle)}>
-                Retake
-              </Button>
-            </YStack>
-          ) : null,
-        )}
-      </YStack>
+      <CapturedAnglesList photos={photos} onRetake={handleRetake} />
 
       {captureError ? <FeedbackBanner variant="error" message={captureError} /> : null}
       {submitError ? <FeedbackBanner variant="error" message={submitError} /> : null}

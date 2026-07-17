@@ -10,7 +10,12 @@
  * has actually been captured, so they stay solely in enrollmentQuality.ts.
  */
 import type { FaceBounds } from './enrollmentQuality';
-import { MAX_CENTER_OFFSET_RATIO, MIN_FACE_SIZE_RATIO } from './enrollmentQuality';
+import {
+  MAX_CENTER_OFFSET_RATIO,
+  MAX_FACE_SIZE_RATIO,
+  MIN_EYE_OPEN_PROBABILITY,
+  MIN_FACE_SIZE_RATIO,
+} from './enrollmentQuality';
 
 /** A yaw turn shallower than this doesn't reliably read as a profile shot. */
 export const MIN_PROFILE_YAW_DEGREES = 15;
@@ -32,6 +37,17 @@ export interface LiveAlignmentSample {
   /** Inclusive upper bound the live yaw must meet for the current target angle. */
   readonly maxYawDegrees: number;
   readonly isOccluded?: boolean;
+  /** Eye-open probabilities for this frame — checked against the same
+   * `MIN_EYE_OPEN_PROBABILITY` floor the post-capture gate enforces, so a
+   * hand/object covering an eye reddens the oval immediately instead of only
+   * surfacing as a rejection after the user taps Capture (found via
+   * live-device testing: a hand covering one eye still showed a green oval,
+   * since this check previously existed only post-capture). Optional/nullable
+   * so a legitimately-turned-away eye during a profile capture — which ML Kit
+   * may report as `null` rather than a low number — isn't penalized here any
+   * more than the post-capture gate already penalizes it. */
+  readonly leftEyeOpen?: number | null;
+  readonly rightEyeOpen?: number | null;
 }
 
 /**
@@ -48,10 +64,20 @@ export function assessLiveAlignment(sample: LiveAlignmentSample): boolean {
   if (sample.faceCount != null && sample.faceCount > 1) {
     return false;
   }
+  if (
+    (sample.leftEyeOpen != null && sample.leftEyeOpen < MIN_EYE_OPEN_PROBABILITY) ||
+    (sample.rightEyeOpen != null && sample.rightEyeOpen < MIN_EYE_OPEN_PROBABILITY)
+  ) {
+    return false;
+  }
 
   const shorterFrameSide = Math.min(sample.frameWidth, sample.frameHeight);
-  const faceSize = Math.min(sample.faceBounds.width, sample.faceBounds.height);
-  if (shorterFrameSide <= 0 || faceSize / shorterFrameSide < MIN_FACE_SIZE_RATIO) {
+  const minFaceSize = Math.min(sample.faceBounds.width, sample.faceBounds.height);
+  if (shorterFrameSide <= 0 || minFaceSize / shorterFrameSide < MIN_FACE_SIZE_RATIO) {
+    return false;
+  }
+  const maxFaceSize = Math.max(sample.faceBounds.width, sample.faceBounds.height);
+  if (maxFaceSize / shorterFrameSide > MAX_FACE_SIZE_RATIO) {
     return false;
   }
 

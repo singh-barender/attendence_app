@@ -5,23 +5,40 @@
  * `useFaceCameraPermission()`/`FaceCameraView` public shape so
  * Step3FaceEnrollScreen/LoginPunchInScreen (neither platform-split) work
  * identically either way.
+ *
+ * Camera-permission state is `faceCameraPermission.web.ts`; the
+ * `FaceResult` -> `LiveFaceInfo` adapter is `humanFaceExtraction.web.ts`'s
+ * `faceResultToLiveInfo` (coding-standards.md's "small, modular,
+ * single-responsibility files").
  */
-import type { FaceResult } from '@vladmandic/human';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import type {
   CapturedFace,
   FaceCameraViewHandle,
   FaceCameraViewProps,
   LiveFaceInfo,
 } from './faceCameraTypes';
-import {
-  eyeOpenProbabilityFrom,
-  pitchDegreesFrom,
-  smileProbabilityFrom,
-  yawDegreesFrom,
-} from './humanFaceExtraction.web';
+
+export { useFaceCameraPermission } from './faceCameraPermission.web';
+
+import { faceResultToLiveInfo } from './humanFaceExtraction.web';
 import { getHuman } from './humanInstance.web';
-import { measureImageQuality } from './imageQualitySignals.web';
+import { measureCanvasRegionQuality, measureImageQuality } from './imageQualitySignals.web';
+
+const EMPTY_FACE_INFO: LiveFaceInfo = {
+  hasFace: false,
+  faceCount: 0,
+  bounds: null,
+  frameWidth: 0,
+  frameHeight: 0,
+  yawAngle: null,
+  leftEyeOpen: null,
+  rightEyeOpen: null,
+  smileProbability: null,
+  pitchAngle: null,
+  isOccluded: false,
+  mouthBottom: null,
+};
 
 /**
  * How often the live per-frame detection loop runs. Human's full `detect()`
@@ -33,100 +50,18 @@ import { measureImageQuality } from './imageQualitySignals.web';
  */
 const DETECTION_INTERVAL_MS = 150;
 
-function faceResultToLiveInfo(
-  face: FaceResult | undefined,
-  faceCount: number,
-  frameWidth: number,
-  frameHeight: number,
-): LiveFaceInfo {
-  if (!face) {
-    return {
-      hasFace: false,
-      faceCount,
-      bounds: null,
-      frameWidth,
-      frameHeight,
-      yawAngle: null,
-      leftEyeOpen: null,
-      rightEyeOpen: null,
-      smileProbability: null,
-      pitchAngle: null,
-      isOccluded: false,
-    };
-  }
-  const [x, y, width, height] = face.box;
-  return {
-    hasFace: true,
-    faceCount,
-    bounds: { x, y, width, height },
-    frameWidth,
-    frameHeight,
-    yawAngle: yawDegreesFrom(face),
-    leftEyeOpen: eyeOpenProbabilityFrom(face, 'leftEyeUpper0', 'leftEyeLower0'),
-    rightEyeOpen: eyeOpenProbabilityFrom(face, 'rightEyeUpper0', 'rightEyeLower0'),
-    smileProbability: smileProbabilityFrom(face),
-    pitchAngle: pitchDegreesFrom(face),
-    isOccluded: false,
-  };
-}
-
-export function useFaceCameraPermission() {
-  const [hasPermission, setHasPermission] = useState(false);
-  const hasDevice =
-    typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
-
-  useEffect(() => {
-    if (!hasDevice || !navigator.permissions?.query) {
-      return;
-    }
-    let cancelled = false;
-    // Best-effort — not every browser supports querying the 'camera'
-    // permission's state without prompting (e.g. some Firefox versions);
-    // a failure here just leaves hasPermission false until
-    // requestPermission() is actually called.
-    navigator.permissions
-      .query({ name: 'camera' as PermissionName })
-      .then((status) => {
-        if (cancelled) {
-          return;
-        }
-        setHasPermission(status.state === 'granted');
-        status.onchange = () => {
-          if (!cancelled) {
-            setHasPermission(status.state === 'granted');
-          }
-        };
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [hasDevice]);
-
-  async function requestPermission(): Promise<boolean> {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      for (const track of stream.getTracks()) {
-        track.stop();
-      }
-      setHasPermission(true);
-      return true;
-    } catch {
-      setHasPermission(false);
-      return false;
-    }
-  }
-
-  return { hasPermission, requestPermission, hasDevice };
-}
-
 export const FaceCameraView = forwardRef<
   FaceCameraViewHandle<HTMLCanvasElement>,
   FaceCameraViewProps
 >(function FaceCameraView({ onFrame, onError }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const latestFaceRef = useRef<FaceResult | undefined>(undefined);
+  // The most recent detection tick's neutral LiveFaceInfo — capture() below
+  // reuses this directly rather than re-detecting, since a canvas snapshot
+  // of an already-live <video> element has no meaningful shutter latency for
+  // this to go stale across (unlike native's real hardware capture — see
+  // faceCamera.native.tsx / capturedPhotoFaceDetection.native.ts).
+  const latestLiveInfoRef = useRef<LiveFaceInfo>(EMPTY_FACE_INFO);
 
   // onFrame/onError are fresh closures every render (screens don't
   // memoize them); reading them via refs instead of useEffect
@@ -183,15 +118,14 @@ export const FaceCameraView = forwardRef<
             face: { description: { enabled: false } },
           });
           const face = result.face[0];
-          latestFaceRef.current = face;
-          onFrameRef.current(
-            faceResultToLiveInfo(
-              face,
-              result.face.length,
-              currentVideo.videoWidth,
-              currentVideo.videoHeight,
-            ),
+          const info = faceResultToLiveInfo(
+            face,
+            result.face.length,
+            currentVideo.videoWidth,
+            currentVideo.videoHeight,
           );
+          latestLiveInfoRef.current = info;
+          onFrameRef.current(info);
         } catch {
           // A single bad frame isn't fatal — skip it and let the next
           // tick retry, rather than surfacing transient per-frame
@@ -232,12 +166,31 @@ export const FaceCameraView = forwardRef<
       }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const { averageBrightness, sharpnessScore } = measureImageQuality(canvas);
+      const faceInfo = latestLiveInfoRef.current;
+      // Measured on the face region specifically, not the whole frame, when
+      // bounds are known (face-verification-pipeline-review-2026-07-16.md) —
+      // a whole-frame average can look normally-exposed while a backlit
+      // face is silhouetted and unusably dark. Falls back to the whole
+      // canvas only if no face was detected (that capture will be rejected
+      // as 'no-face' downstream regardless).
+      const { averageBrightness, sharpnessScore } = faceInfo.bounds
+        ? measureCanvasRegionQuality(canvas, faceInfo.bounds)
+        : measureImageQuality(canvas);
       return {
         image: canvas,
         averageBrightness,
         sharpnessScore,
         previewUri: canvas.toDataURL('image/jpeg'),
+        mouthRegionSharpnessRatio: null,
+        handDetected: false,
+        hasFace: faceInfo.hasFace,
+        faceCount: faceInfo.faceCount,
+        faceBounds: faceInfo.bounds,
+        frameWidth: faceInfo.frameWidth,
+        frameHeight: faceInfo.frameHeight,
+        leftEyeOpen: faceInfo.leftEyeOpen,
+        rightEyeOpen: faceInfo.rightEyeOpen,
+        isOccluded: faceInfo.isOccluded,
       };
     },
   }));

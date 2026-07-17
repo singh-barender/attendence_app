@@ -1,4 +1,8 @@
-import { FACE_CROP_MARGIN_RATIO, mapFaceBoundsToCropRect } from './faceCrop';
+import {
+  FACE_CROP_MARGIN_RATIO,
+  mapFaceBoundsToCropRect,
+  mapFacePointToImageSpace,
+} from './faceCrop';
 
 describe('mapFaceBoundsToCropRect', () => {
   it('scales a centered box proportionally when the image is larger than the frame', () => {
@@ -59,5 +63,22 @@ describe('mapFaceBoundsToCropRect', () => {
 
     expect(rect.endX).toBe(640);
     expect(rect.endY).toBe(480);
+  });
+});
+
+describe('mapFacePointToImageSpace', () => {
+  it('scales a point proportionally when the image is larger than the frame', () => {
+    const point = mapFacePointToImageSpace({ x: 320, y: 240 }, 640, 480, 1280, 960);
+    expect(point).toEqual({ x: 640, y: 480 });
+  });
+
+  it('maps 1:1 when frame and image dimensions match', () => {
+    const point = mapFacePointToImageSpace({ x: 100, y: 50 }, 640, 480, 640, 480);
+    expect(point).toEqual({ x: 100, y: 50 });
+  });
+
+  it('clamps to the image bounds when the point falls outside the frame', () => {
+    const point = mapFacePointToImageSpace({ x: -10, y: 500 }, 640, 480, 640, 480);
+    expect(point).toEqual({ x: 0, y: 480 });
   });
 });
