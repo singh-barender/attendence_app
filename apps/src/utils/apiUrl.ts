@@ -7,7 +7,7 @@ export function getApiUrl(): string {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL;
   if (!apiUrl) {
     throw new Error(
-      'EXPO_PUBLIC_API_URL is not set — copy apps/mobile/.env.example to apps/mobile/.env and fill it in.',
+      'EXPO_PUBLIC_API_URL is not set — copy apps/.env.example to apps/.env and fill it in.',
     );
   }
   return apiUrl;

@@ -22,7 +22,7 @@ export const NOTIFICATIONS_SUPPORTED = true;
 const REMINDER_IDENTIFIER = 'daily-checkin-reminder';
 
 /**
- * 15 minutes before `services/backend`'s `SHIFT_START_HOUR` default (9) —
+ * 15 minutes before `backend`'s `SHIFT_START_HOUR` default (9) —
  * a reminder that fires *after* the shift has already started misses the
  * point. This is a single global constant, not per-user configurable,
  * consistent with this app's existing no-multi-tenant/no-per-user-shift

@@ -1,6 +1,6 @@
 /**
  * Client-side pre-checks only, for immediate form feedback — the server
- * (services/backend/src/services/userService.ts) is the authoritative
+ * (backend/src/services/userService.ts) is the authoritative
  * validator on every one of these rules, same philosophy as ADR-007's
  * "client is optimistic, server decides."
  */

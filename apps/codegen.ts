@@ -8,7 +8,7 @@
 import type { CodegenConfig } from '@graphql-codegen/cli';
 
 const config: CodegenConfig = {
-  schema: '../../services/backend/schema.graphql',
+  schema: '../backend/schema.graphql',
   documents: 'src/graphql/**/*.graphql',
   generates: {
     'src/generated/graphql.ts': {
@@ -24,7 +24,7 @@ const config: CodegenConfig = {
         reactQueryVersion: 5,
         exposeQueryKeys: true,
         exposeMutationKeys: true,
-        // Without this, the custom DateTime scalar (services/backend's
+        // Without this, the custom DateTime scalar (backend's
         // scalars.ts — an ISO 8601 string over the wire) generates as
         // `unknown`, forcing every consumer to cast instead of just
         // parsing a string.

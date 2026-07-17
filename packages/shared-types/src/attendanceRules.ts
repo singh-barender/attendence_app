@@ -1,5 +1,5 @@
 /**
- * Hours-worked threshold for a "full day" — `services/backend`'s `config.ts`
+ * Hours-worked threshold for a "full day" — `backend`'s `config.ts`
  * is the authoritative, env-overridable value (`FULL_DAY_HOURS`), defaulting
  * to this same number; the mobile client's missed-checkout background task
  * (`missedCheckoutTask.native.ts`) needs its own copy of this threshold

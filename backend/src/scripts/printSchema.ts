@@ -1,5 +1,5 @@
 /**
- * Exports the Pothos-built schema as static SDL so apps/mobile's codegen
+ * Exports the Pothos-built schema as static SDL so apps's codegen
  * (ADR-012) can read it without a running dev server — codegen needs a
  * schema source, and Pothos is code-first so no .graphql schema file exists
  * otherwise. Output is gitignored, regenerated via `pnpm print-schema`.
