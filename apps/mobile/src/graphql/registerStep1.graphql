@@ -4,7 +4,6 @@ mutation RegisterStep1(
   $password: String!
   $age: Int
   $gender: String
-  $location: String
 ) {
   registerStep1(
     email: $email
@@ -12,9 +11,11 @@ mutation RegisterStep1(
     password: $password
     age: $age
     gender: $gender
-    location: $location
   ) {
-    id
-    registrationStep
+    token
+    user {
+      id
+      registrationStep
+    }
   }
 }

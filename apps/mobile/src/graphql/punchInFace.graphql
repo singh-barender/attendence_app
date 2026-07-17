@@ -1,6 +1,11 @@
 mutation PunchInFace(
   $userId: ID!
   $embedding: [Float!]!
+  $embeddingModel: EmbeddingModel!
+  $livenessChallengeType: LivenessChallengeType!
+  $livenessSamples: [LivenessSampleInput!]!
+  $idempotencyKey: String
+  $clientTimestamp: DateTime
   $latitude: Float
   $longitude: Float
   $address: String
@@ -8,6 +13,11 @@ mutation PunchInFace(
   punchInFace(
     userId: $userId
     embedding: $embedding
+    embeddingModel: $embeddingModel
+    livenessChallengeType: $livenessChallengeType
+    livenessSamples: $livenessSamples
+    idempotencyKey: $idempotencyKey
+    clientTimestamp: $clientTimestamp
     latitude: $latitude
     longitude: $longitude
     address: $address
@@ -15,7 +25,6 @@ mutation PunchInFace(
     matched
     bestScore
     type
-    token
     record {
       id
       date

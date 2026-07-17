@@ -13,7 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db/client';
 import { buildAttendanceCsv, deriveExportFilename } from '../services/attendanceCsv';
 import { getAttendanceHistory } from '../services/attendanceReportingService';
-import { extractUserIdFromAuthHeader } from '../services/tokenService';
+import { extractSessionFromAuthHeader } from '../services/tokenService';
 
 /** Only accept well-formed YYYY-MM-DD bounds; anything else is ignored (a
  * malformed param falls back to "no bound" rather than erroring the export). */
@@ -25,11 +25,12 @@ function sanitizeDateParam(value: unknown): string | undefined {
 
 export function registerExportCsvRoute(app: FastifyInstance): void {
   app.get('/export/attendance.csv', async (request, reply) => {
-    const userId = await extractUserIdFromAuthHeader(request.headers.authorization);
-    if (!userId) {
+    const session = await extractSessionFromAuthHeader(request.headers.authorization);
+    if (!session) {
       await reply.code(401).send({ error: 'Unauthorized' });
       return;
     }
+    const { userId } = session;
 
     const user = await prisma.user.findUnique({
       where: { id: userId },

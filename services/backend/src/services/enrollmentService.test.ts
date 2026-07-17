@@ -35,4 +35,30 @@ describe('assertEnrollmentConsistency', () => {
       }),
     ).toThrow();
   });
+
+  it('rejects the same embedding submitted three times over (follow-up review: lazy-enrollment finding)', () => {
+    // A single photo's embedding reused for frontal/left/right — cosine 1.0
+    // against itself, trivially passing the lower bound despite capturing
+    // zero real angular variation.
+    const singlePhoto = [1, 0, 0];
+    expect(() =>
+      assertEnrollmentConsistency({
+        frontal: singlePhoto,
+        left: [...singlePhoto],
+        right: [...singlePhoto],
+      }),
+    ).toThrow(/identical/i);
+  });
+
+  it('still accepts genuine angle variation close to (but not exactly) frontal', () => {
+    // A shallow but real turn — well under the similarity ceiling — must not
+    // false-reject as a "duplicate" just for being a mild angle change.
+    expect(() =>
+      assertEnrollmentConsistency({
+        frontal: [1, 0, 0],
+        left: [0.99, 0.05, 0],
+        right: [0.99, 0, 0.05],
+      }),
+    ).not.toThrow();
+  });
 });

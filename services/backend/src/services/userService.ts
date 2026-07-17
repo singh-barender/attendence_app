@@ -4,14 +4,9 @@
  * entry point ever needs the same rules (ADR-011's zod-for-business-rules
  * stance).
  */
-import {
-  ACCOUNT_NOT_FOUND_MESSAGE,
-  MAX_REGISTRATION_AGE,
-  MIN_REGISTRATION_AGE,
-} from '@attendance-app/shared-types';
+import { MAX_REGISTRATION_AGE, MIN_REGISTRATION_AGE } from '@attendance-app/shared-types';
 import { z } from 'zod';
 import { prisma } from '../db/client';
-import type { User } from '../generated/prisma/client';
 
 const emailSchema = z.string().email();
 const ageSchema = z.number().int().min(MIN_REGISTRATION_AGE).max(MAX_REGISTRATION_AGE);
@@ -36,13 +31,4 @@ export async function assertEmailNotRegistered(email: string): Promise<void> {
   if (existing) {
     throw new Error('An account with this email already exists');
   }
-}
-
-/** Used by the `identify` query (email is the account lookup key, ADR-004). */
-export async function findUserByEmail(email: string): Promise<User> {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    throw new Error(ACCOUNT_NOT_FOUND_MESSAGE);
-  }
-  return user;
 }

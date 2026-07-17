@@ -21,7 +21,9 @@ import { StepProgress } from '../../components/StepProgress';
 import { useThemePreference } from '../../contexts/ThemePreferenceContext';
 import { useRegisterStep1Mutation } from '../../generated/graphql';
 import type { RootScreenProps } from '../../navigation/types';
+import { setAuthToken } from '../../services/graphqlClient';
 import { getErrorMessage } from '../../services/graphqlError';
+import { saveToken } from '../../services/tokenStorage';
 import { GLASS_PALETTES } from '../../theme/glassPalette';
 import { isValidEmail } from '../../utils/validation';
 
@@ -44,13 +46,20 @@ export function Step1BasicInfoScreen({ navigation, route }: RootScreenProps<'Reg
   const [password, setPassword] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
-  const [location, setLocation] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const { mutate, isPending, error, isError } = useRegisterStep1Mutation({
-    onSuccess: (data) => {
-      const userId = data.registerStep1?.id;
-      if (userId) {
+    // registerStep1 now issues a session token immediately, the same way
+    // login does (architecture-review-2026-07-16.md's F2b) — store it right
+    // away so Step 2/3's mutations (which derive the account from this
+    // session rather than taking a client-supplied userId) are authenticated
+    // for the rest of the wizard.
+    onSuccess: async (data) => {
+      const token = data.registerStep1?.token;
+      const userId = data.registerStep1?.user?.id;
+      if (token && userId) {
+        await saveToken(token);
+        setAuthToken(token);
         navigation.navigate('RegisterStep2', { userId, email: email.trim() });
       }
     },
@@ -89,7 +98,6 @@ export function Step1BasicInfoScreen({ navigation, route }: RootScreenProps<'Reg
       password,
       age: age.trim() ? Number(age) : undefined,
       gender: gender || undefined,
-      location: location.trim() || undefined,
     });
   }
 
@@ -181,18 +189,6 @@ export function Step1BasicInfoScreen({ navigation, route }: RootScreenProps<'Reg
           />
         </Fieldset>
 
-        <Fieldset gap="$2">
-          <Label htmlFor="location">Location (optional)</Label>
-          <IconInput
-            icon="location-outline"
-            id="location"
-            value={location}
-            onChangeText={setLocation}
-            placeholder="City, Country"
-            returnKeyType="done"
-          />
-        </Fieldset>
-
         {isError ? <FeedbackBanner variant="error" message={getErrorMessage(error)} /> : null}
 
         <Button
@@ -202,7 +198,7 @@ export function Step1BasicInfoScreen({ navigation, route }: RootScreenProps<'Reg
           {...(isPending ? { icon: <Spinner /> } : {})}
         >
           <Text style={{ color: palette.accentInk, fontWeight: '700', letterSpacing: 1 }}>
-            {(isPending ? 'Submitting...' : 'Next: Fingerprint').toUpperCase()}
+            {(isPending ? 'Submitting...' : 'Step 2').toUpperCase()}
           </Text>
         </Button>
       </GlassCard>

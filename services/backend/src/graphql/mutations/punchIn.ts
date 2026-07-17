@@ -15,17 +15,75 @@
  * success/failure (ADR-007 — "the actual security boundary of the app").
  * The client's live embedding is trusted as *input* (a photo was captured
  * and locally embedded), but never as a *match decision*.
+ *
+ * It also independently re-verifies liveness (architecture-review-2026-07-16
+ * .md's F1) — the client's own `detected` boolean from its liveness
+ * challenge was, until now, never checked server-side, meaning an embedding
+ * computed from any static photo (submitted directly against the API,
+ * bypassing the app's camera/challenge entirely) could pass as long as it
+ * matched an enrolled embedding. `judgeLiveness` re-runs the same
+ * `@attendance-app/liveness` decision function against the actual sample
+ * window the client claims completed the challenge, and this check runs
+ * *before* the embedding match — a failed liveness re-check rejects the
+ * punch without ever reaching the match logic.
+ *
+ * `embeddingModel` (F3) scopes `getFaceEmbeddings` to only the enrolled
+ * embeddings produced by the same model as this live one — Android
+ * (MobileFaceNet) and web (Human FaceRes) are independently-trained models
+ * with incompatible embedding spaces (ADR-006), so comparing across them
+ * would previously have thrown (dimension mismatch) or, worse, produced a
+ * meaningless score. An account enrolled on one platform but verifying on
+ * the other now gets a clear, actionable message instead.
+ *
+ * `idempotencyKey` (F7) is optional — supplying one lets `recordPunch`
+ * recognize a retried offline mutation that actually already succeeded
+ * (response lost in transit) and return the original record instead of
+ * re-inferring punch type against now-changed state. See the column comment
+ * in schema.prisma and `recordPunch`'s own doc comment.
+ *
+ * Neither mutation issues a session token anymore (a follow-up review
+ * finding on F7/F8): both require an already-authenticated session to be
+ * called at all (`assertPunchIdentity`), so under ADR-030 a punch is no
+ * longer an authentication event the way it was pre-ADR-030 — issuing a
+ * fresh token on every punch just left the previous one behind as a still-
+ * valid, unrevoked, orphaned credential (the client replaced its stored
+ * token, but nothing told the server the old one was no longer wanted),
+ * accumulating one extra live token per punch with no way to revoke them
+ * as a group. Since the caller's existing session token remains valid and
+ * untouched throughout, there is nothing to rotate.
+ *
+ * `clientTimestamp` (two rounds of follow-up review findings, offline sync
+ * date-drift) is optional — when present and plausible, `recordPunch`
+ * resolves it into the single effective instant used for both which *day*
+ * this punch belongs to (CHECK_IN-vs-CHECK_OUT inference) and the stored
+ * `timestamp` itself (displayed check-in/out times, CSV export, hours-
+ * worked, lateness). Without this, a punch queued while offline and resumed
+ * after local midnight got bucketed against the wrong day, and — even once
+ * date-bucketing alone was fixed — a whole offline-batched day synced at
+ * once produced a self-contradictory result (near-zero hours worked, a
+ * false "late" flag, wrong displayed clock times) because the stored
+ * timestamp still reflected server-receipt time. The true receipt instant
+ * isn't discarded — `AttendanceRecord.serverReceivedAt` keeps it as a
+ * hidden forensic fact never exposed via GraphQL. See
+ * `resolvePunchTimestamp`'s doc comment in attendanceService.ts for the
+ * full reasoning and its trust-boundary scope.
  */
 import { isMatch } from '@attendance-app/face-matching';
 import { config } from '../../config';
 import type { AttendanceRecord } from '../../generated/prisma/client';
 import * as attendanceService from '../../services/attendanceService';
 import * as enrollmentService from '../../services/enrollmentService';
-import { issueSessionToken } from '../../services/tokenService';
+import { judgeLiveness } from '../../services/livenessVerificationService';
 import { builder } from '../builder';
 import type { GraphQLContext } from '../context';
 import { AttendanceRecordRef } from '../types/AttendanceRecord';
-import { PunchTypeEnum } from '../types/enums';
+import { EmbeddingModelEnum, PunchTypeEnum } from '../types/enums';
+import {
+  LivenessChallengeTypeEnum,
+  LivenessSampleInput,
+  toLivenessSample,
+} from '../types/liveness';
+import { DateTimeScalar } from '../types/scalars';
 
 /**
  * Punches now require an authenticated session and may only be for the
@@ -46,7 +104,6 @@ function assertPunchIdentity(ctx: GraphQLContext, userId: string): void {
 }
 
 export interface PunchInResultShape {
-  token: string;
   record: AttendanceRecord;
   type: attendanceService.PunchType;
   matched: boolean;
@@ -55,7 +112,6 @@ export interface PunchInResultShape {
 
 const PunchInResult = builder.objectRef<PunchInResultShape>('PunchInResult').implement({
   fields: (t) => ({
-    token: t.exposeString('token'),
     record: t.field({ type: AttendanceRecordRef, resolve: (result) => result.record }),
     type: t.field({ type: PunchTypeEnum, resolve: (result) => result.type }),
     matched: t.exposeBoolean('matched'),
@@ -68,6 +124,8 @@ builder.mutationField('punchInFingerprint', (t) =>
     type: PunchInResult,
     args: {
       userId: t.arg.id({ required: true }),
+      idempotencyKey: t.arg.string(),
+      clientTimestamp: t.arg({ type: DateTimeScalar }),
       latitude: t.arg.float(),
       longitude: t.arg.float(),
       address: t.arg.string(),
@@ -98,11 +156,11 @@ builder.mutationField('punchInFingerprint', (t) =>
         latitude: args.latitude ?? null,
         longitude: args.longitude ?? null,
         address: args.address ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+        clientTimestamp: args.clientTimestamp ?? null,
       });
 
-      const token = await issueSessionToken(userId);
-
-      return { token, record, type, matched: true, bestScore: null };
+      return { record, type, matched: true, bestScore: null };
     },
   }),
 );
@@ -113,6 +171,11 @@ builder.mutationField('punchInFace', (t) =>
     args: {
       userId: t.arg.id({ required: true }),
       embedding: t.arg.floatList({ required: true }),
+      embeddingModel: t.arg({ type: EmbeddingModelEnum, required: true }),
+      livenessChallengeType: t.arg({ type: LivenessChallengeTypeEnum, required: true }),
+      livenessSamples: t.arg({ type: [LivenessSampleInput], required: true }),
+      idempotencyKey: t.arg.string(),
+      clientTimestamp: t.arg({ type: DateTimeScalar }),
       latitude: t.arg.float(),
       longitude: t.arg.float(),
       address: t.arg.string(),
@@ -120,7 +183,24 @@ builder.mutationField('punchInFace', (t) =>
     resolve: async (_root, args, ctx): Promise<PunchInResultShape> => {
       const userId = String(args.userId);
       assertPunchIdentity(ctx, userId);
-      const enrolledEmbeddings = await enrollmentService.getFaceEmbeddings(userId);
+
+      const livenessPassed = judgeLiveness(
+        args.livenessChallengeType,
+        args.livenessSamples.map(toLivenessSample),
+      );
+      if (!livenessPassed) {
+        await attendanceService.logVerificationAttempt({
+          userId,
+          method: attendanceService.VERIFICATION_METHOD.FACE,
+          outcome: attendanceService.VERIFICATION_OUTCOME.FAILURE,
+        });
+        throw new Error('Liveness check failed — please try again.');
+      }
+
+      const enrolledEmbeddings = await enrollmentService.getFaceEmbeddings(
+        userId,
+        args.embeddingModel,
+      );
 
       if (enrolledEmbeddings.length === 0) {
         await attendanceService.logVerificationAttempt({
@@ -128,7 +208,17 @@ builder.mutationField('punchInFace', (t) =>
           method: attendanceService.VERIFICATION_METHOD.FACE,
           outcome: attendanceService.VERIFICATION_OUTCOME.FAILURE,
         });
-        throw new Error('Face is not enrolled for this account');
+        // Distinguishes "never enrolled face at all" from "enrolled, but not
+        // on this platform" (architecture-review-2026-07-16.md's F3) — the
+        // latter needs a message that tells the user what to actually do
+        // (re-enroll here, or use the platform they originally enrolled on)
+        // rather than implying they've never enrolled face at all.
+        const hasAnyEnrollment = await enrollmentService.hasAnyFaceEnrollment(userId);
+        throw new Error(
+          hasAnyEnrollment
+            ? "Face verification isn't set up on this platform for your account yet — re-enroll your face here, or use the platform you originally enrolled on."
+            : 'Face is not enrolled for this account',
+        );
       }
 
       const { matched, bestScore } = isMatch(
@@ -157,11 +247,11 @@ builder.mutationField('punchInFace', (t) =>
         latitude: args.latitude ?? null,
         longitude: args.longitude ?? null,
         address: args.address ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+        clientTimestamp: args.clientTimestamp ?? null,
       });
 
-      const token = await issueSessionToken(userId);
-
-      return { token, record, type, matched, bestScore };
+      return { record, type, matched, bestScore };
     },
   }),
 );

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "print-schema": "tsx src/scripts/printSchema.ts",
+    "analyze-match-scores": "tsx src/scripts/analyzeMatchScores.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "DATABASE_URL=file:./test.db prisma migrate deploy",
     "test": "vitest run",
@@ -13,6 +14,7 @@
   },
   "dependencies": {
     "@attendance-app/face-matching": "workspace:*",
+    "@attendance-app/liveness": "workspace:*",
     "@attendance-app/shared-types": "workspace:*",
     "@fastify/cors": "catalog:",
     "@fastify/rate-limit": "catalog:",

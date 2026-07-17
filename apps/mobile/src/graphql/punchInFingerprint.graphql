@@ -1,6 +1,15 @@
-mutation PunchInFingerprint($userId: ID!, $latitude: Float, $longitude: Float, $address: String) {
+mutation PunchInFingerprint(
+  $userId: ID!
+  $idempotencyKey: String
+  $clientTimestamp: DateTime
+  $latitude: Float
+  $longitude: Float
+  $address: String
+) {
   punchInFingerprint(
     userId: $userId
+    idempotencyKey: $idempotencyKey
+    clientTimestamp: $clientTimestamp
     latitude: $latitude
     longitude: $longitude
     address: $address
@@ -8,7 +17,6 @@ mutation PunchInFingerprint($userId: ID!, $latitude: Float, $longitude: Float, $
     matched
     bestScore
     type
-    token
     record {
       id
       date

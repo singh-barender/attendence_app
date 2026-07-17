@@ -9,10 +9,20 @@
  * contract (ADR-007: this same embedding computation must be swappable
  * per platform behind one interface).
  */
-import type { FaceEmbedder, FaceEmbeddingResult } from '@attendance-app/face-matching';
+import {
+  EMBEDDING_MODEL,
+  type FaceEmbedder,
+  type FaceEmbeddingResult,
+} from '@attendance-app/face-matching';
 import type { TfliteModel } from 'react-native-fast-tflite';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 import type { Image } from 'react-native-nitro-image';
+
+/** Which model this platform's embeddings come from
+ * (architecture-review-2026-07-16.md's F3) — sent alongside every
+ * enrollment/verification embedding so the server only ever compares
+ * embeddings produced by the same model. */
+export const EMBEDDING_MODEL_ID = EMBEDDING_MODEL.MOBILEFACENET_128;
 
 /**
  * `PixelFormat`/`RawPixelData` aren't re-exported from the package's public

@@ -34,7 +34,7 @@ export function Step2FingerprintScreen({ navigation, route }: RootScreenProps<'R
    * exist here, recording `fingerprintConfirmed: false` as the accurate
    * outcome (not attempted, not merely failed). */
   function handleSkip() {
-    mutate({ userId, fingerprintConfirmed: false });
+    mutate({ fingerprintConfirmed: false });
   }
 
   if (!FINGERPRINT_SUPPORTED) {
@@ -71,7 +71,7 @@ export function Step2FingerprintScreen({ navigation, route }: RootScreenProps<'R
         <FingerprintConfirmationPanel
           promptMessage="Confirm your fingerprint to continue registration"
           confirmLabel="Confirm Fingerprint"
-          onConfirmed={() => mutate({ userId, fingerprintConfirmed: true })}
+          onConfirmed={() => mutate({ fingerprintConfirmed: true })}
           isSubmitting={isPending}
           submitError={isError ? getErrorMessage(error) : null}
         />

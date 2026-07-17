@@ -5,7 +5,6 @@ query ExportMyData {
       email
       age
       gender
-      location
       createdAt
       registrationStep
     }

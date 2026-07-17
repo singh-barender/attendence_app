@@ -1,5 +1,5 @@
-mutation RegisterStep3($userId: ID!, $embeddings: FaceEmbeddingsInput!) {
-  registerStep3(userId: $userId, embeddings: $embeddings) {
+mutation RegisterStep3($embeddings: FaceEmbeddingsInput!, $embeddingModel: EmbeddingModel!) {
+  registerStep3(embeddings: $embeddings, embeddingModel: $embeddingModel) {
     id
     registrationStep
   }

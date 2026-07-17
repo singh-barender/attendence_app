@@ -9,6 +9,24 @@
 /** A single face embedding vector, as produced by a FaceEmbedder. */
 export type FaceEmbedding = readonly number[];
 
+/**
+ * Which model produced a given embedding (architecture-review-2026-07-16
+ * .md's F3) — Android's MobileFaceNet and web's Human FaceRes are
+ * independently-trained models with incompatible embedding spaces (ADR-006
+ * documents this as a deliberate, honest "real code duplication at the
+ * ML-runtime boundary", but the consequence — that the two models'
+ * embeddings can't be compared — was never propagated into the data model
+ * or matching logic until now). Every stored/live embedding is tagged with
+ * this so matching only ever compares like with like, tagged, checked
+ * embeddings, never silently assumes any two embeddings share a space
+ * regardless of what produced them.
+ */
+export const EMBEDDING_MODEL = {
+  MOBILEFACENET_128: 'MOBILEFACENET_128',
+  HUMAN_FACERES: 'HUMAN_FACERES',
+} as const;
+export type EmbeddingModelId = (typeof EMBEDDING_MODEL)[keyof typeof EMBEDDING_MODEL];
+
 /** Result of running face detection + embedding on a captured frame/image. */
 export interface FaceEmbeddingResult {
   readonly embedding: FaceEmbedding;

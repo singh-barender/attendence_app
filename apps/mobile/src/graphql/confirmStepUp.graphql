@@ -1,0 +1,5 @@
+mutation ConfirmStepUp($password: String!) {
+  confirmStepUp(password: $password) {
+    stepUpToken
+  }
+}

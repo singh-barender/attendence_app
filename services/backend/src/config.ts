@@ -13,7 +13,18 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  JWT_SECRET: z.string().min(32),
+  // The .env.example placeholder text is deliberately long enough (38 chars)
+  // to pass a bare `.min(32)` check silently — refusing that exact literal
+  // is what actually forces every real deploy to generate its own secret,
+  // instead of a copy-pasted .env quietly signing tokens with a value that's
+  // public in this repo's own example file.
+  JWT_SECRET: z
+    .string()
+    .min(32)
+    .refine((value) => value !== 'replace-with-a-real-32-byte-hex-secret', {
+      message:
+        'JWT_SECRET is still the .env.example placeholder — generate a real secret (see the comment above it in .env.example).',
+    }),
   // "Late" status derivation (ADR-016) — a single global shift-start hour,
   // since there's no per-user/per-org schedule (no multi-tenant support,
   // per requirements.md's explicit non-goals).

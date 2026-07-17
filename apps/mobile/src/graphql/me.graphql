@@ -1,11 +1,12 @@
 query Me {
   me {
+    id
     fullName
     email
     age
     gender
-    location
     createdAt
+    registrationStep
     enrollmentStatus {
       faceEnrolled
       fingerprintEnrolled

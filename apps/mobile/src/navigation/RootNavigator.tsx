@@ -1,10 +1,12 @@
 /**
- * The app's one navigation stack (architecture.md) — Login is the initial
- * route. There is deliberately no "skip Login if a session already exists"
- * redirect: per requirements.md, biometric verification IS the punch event,
- * so returning to the app always re-verifies rather than silently reusing a
- * stored session token to bypass that (the stored token is only used to
- * authorize history/export requests within the same session, ADR-004).
+ * The app's one navigation stack (architecture.md) — `Login` (now
+ * `AuthLoginScreen`, ADR-030's email+password screen) is the initial route,
+ * but it isn't a forced re-entry point: it redirects straight to the
+ * dashboard on mount if a valid session token is already stored, since the
+ * password only gates *establishing* a session, not viewing within one. The
+ * `Punch` route (`LoginPunchInScreen`) is where a real biometric
+ * verification actually happens, reached only from the dashboard on demand
+ * — see `AuthLoginScreen`'s and `LoginPunchInScreen`'s own doc comments.
  *
  * `screenOptions.contentStyle` is transparent (user-requested redesign) so
  * every screen sits on top of `GradientBackground` (mounted once around

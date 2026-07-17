@@ -10,10 +10,20 @@
  * would actually hurt accuracy, since Human's own internal alignment
  * expects the full face context (surrounding hair/jaw/ears) to work from.
  */
-import type { FaceEmbedder, FaceEmbeddingResult } from '@attendance-app/face-matching';
+import {
+  EMBEDDING_MODEL,
+  type FaceEmbedder,
+  type FaceEmbeddingResult,
+} from '@attendance-app/face-matching';
 import { getHuman } from './humanInstance.web';
 
 export type WebFaceImageInput = HTMLCanvasElement | HTMLVideoElement | ImageData;
+
+/** Which model this platform's embeddings come from
+ * (architecture-review-2026-07-16.md's F3) — sent alongside every
+ * enrollment/verification embedding so the server only ever compares
+ * embeddings produced by the same model. */
+export const EMBEDDING_MODEL_ID = EMBEDDING_MODEL.HUMAN_FACERES;
 
 /** Exported as `faceEmbedder` (not e.g. `webFaceEmbedder`) — see
  * faceEmbedder.native.ts's matching comment: screens import this via the

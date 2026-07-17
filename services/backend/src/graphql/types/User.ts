@@ -16,7 +16,6 @@ export const UserRef = builder.prismaObject('User', {
     email: t.exposeString('email'),
     age: t.exposeInt('age', { nullable: true }),
     gender: t.exposeString('gender', { nullable: true }),
-    location: t.exposeString('location', { nullable: true }),
     registrationStep: t.exposeInt('registrationStep'),
     createdAt: t.field({
       type: DateTimeScalar,

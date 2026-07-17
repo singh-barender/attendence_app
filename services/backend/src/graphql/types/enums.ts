@@ -6,6 +6,7 @@
  * few of these, reviewed together here rather than duplicated per file.
  */
 
+import { EMBEDDING_MODEL } from '@attendance-app/face-matching';
 import { ATTENDANCE_STATUS } from '../../services/attendanceReportingService';
 import {
   PUNCH_TYPE,
@@ -28,4 +29,10 @@ export const VerificationOutcomeEnum = builder.enumType('VerificationOutcome', {
 
 export const AttendanceStatusEnum = builder.enumType('AttendanceStatus', {
   values: Object.values(ATTENDANCE_STATUS),
+});
+
+/** Which model produced a face embedding (architecture-review-2026-07-16
+ * .md's F3) — Android (MOBILEFACENET_128) vs. web (HUMAN_FACERES). */
+export const EmbeddingModelEnum = builder.enumType('EmbeddingModel', {
+  values: Object.values(EMBEDDING_MODEL),
 });
