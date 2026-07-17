@@ -5,31 +5,31 @@
  * CSV export share flow (task 1.20, ADR-014). Requires auth (a session
  * token from a punch-in, task 1.18) — an unauthenticated visit gets a clear
  * "punch in first" message instead of a raw GraphQL error.
+ *
+ * This screen is a thin orchestrator (coding-standards.md's "small, modular,
+ * single-responsibility files") — CSV export is `AttendanceExportCard`, the
+ * List/Calendar toggle is `AttendanceViewModeToggle`, and each list row is
+ * `AttendanceDayListItem`.
  */
 import { useMutationState, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { RefreshControl } from 'react-native';
 import { Button, Spinner, Text, XStack, YStack } from 'tamagui';
 import { AttendanceCalendar } from '../components/AttendanceCalendar';
+import { AttendanceDayListItem } from '../components/AttendanceDayListItem';
+import { AttendanceExportCard } from '../components/AttendanceExportCard';
 import { AttendanceStatsCard } from '../components/AttendanceStatsCard';
+import { AttendanceViewModeToggle, type ViewMode } from '../components/AttendanceViewModeToggle';
 import { FeedbackBanner } from '../components/FeedbackBanner';
-import { GlassCard } from '../components/GlassCard';
-import { PunchLocation } from '../components/PunchLocation';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SessionTimer } from '../components/SessionTimer';
-import { StatusBadge } from '../components/StatusBadge';
 import { useThemePreference } from '../contexts/ThemePreferenceContext';
 import { useAttendanceHistoryQuery, useMeQuery } from '../generated/graphql';
 import type { RootScreenProps } from '../navigation/types';
-import { exportAttendanceCsv } from '../platform/csvExport';
 import { getErrorMessage } from '../services/graphqlError';
 import { logout } from '../services/session';
 import { GLASS_PALETTES } from '../theme/glassPalette';
 import { computeMonthlyStats } from '../utils/attendanceStats';
-import { EXPORT_RANGE_PRESETS, type ExportRangePreset, getDateRange } from '../utils/dateRange';
-import { formatDisplayDate, formatHoursWorked, formatPunchTime } from '../utils/formatDateTime';
-
-type ViewMode = 'list' | 'calendar';
 
 export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) {
   const { resolvedTheme } = useThemePreference();
@@ -42,8 +42,6 @@ export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) 
   const { data: meData } = useMeQuery();
   const signedInName = meData?.me?.fullName;
   const signedInEmail = meData?.me?.email;
-  const [exportingPreset, setExportingPreset] = useState<ExportRangePreset | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   // Punches queued offline sit in the mutation cache as *paused* mutations
@@ -58,18 +56,6 @@ export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) 
   const days = data?.attendanceHistory ?? [];
   const openSessionDay = days.find((day) => day.status === 'OPEN');
   const monthlyStats = computeMonthlyStats(days);
-
-  async function handleExport(preset: ExportRangePreset) {
-    setExportError(null);
-    setExportingPreset(preset);
-    try {
-      await exportAttendanceCsv(getDateRange(preset));
-    } catch (err) {
-      setExportError(getErrorMessage(err, 'Failed to export CSV.'));
-    } finally {
-      setExportingPreset(null);
-    }
-  }
 
   // Log out ends the device session (token + cache) and returns to Login;
   // it does not check the user out — an open session stays open server-side
@@ -129,28 +115,7 @@ export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) 
         <AttendanceStatsCard stats={monthlyStats} pendingSyncCount={pendingSyncCount} />
       ) : null}
 
-      {!isUnauthorized && days.length > 0 ? (
-        <GlassCard gap="$2">
-          <Text style={{ color: palette.ink, fontWeight: '700' }}>Export report (CSV)</Text>
-          <Text style={{ color: palette.inkSoft, fontSize: 12 }}>
-            Tap a range to download a per-day attendance report.
-          </Text>
-          <XStack gap="$2" style={{ flexWrap: 'wrap' }}>
-            {EXPORT_RANGE_PRESETS.map((preset) => (
-              <Button
-                key={preset.key}
-                size="$3"
-                onPress={() => handleExport(preset.key)}
-                disabled={exportingPreset !== null}
-                {...(exportingPreset === preset.key ? { icon: <Spinner /> } : {})}
-              >
-                <Text style={{ color: palette.ink }}>{preset.label}</Text>
-              </Button>
-            ))}
-          </XStack>
-        </GlassCard>
-      ) : null}
-      {exportError ? <FeedbackBanner variant="error" message={exportError} /> : null}
+      {!isUnauthorized && days.length > 0 ? <AttendanceExportCard /> : null}
 
       {isLoading ? (
         <YStack gap="$2" style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -186,75 +151,13 @@ export function AttendanceScreen({ navigation }: RootScreenProps<'Attendance'>) 
       ) : null}
 
       {!isUnauthorized && !isError && days.length > 0 ? (
-        <XStack gap="$2">
-          <Button
-            flex={1}
-            size="$3"
-            style={{ backgroundColor: viewMode === 'list' ? palette.accent : undefined }}
-            onPress={() => setViewMode('list')}
-          >
-            <Text
-              style={{
-                color: viewMode === 'list' ? palette.accentInk : palette.inkSoft,
-                fontWeight: '700',
-              }}
-            >
-              List
-            </Text>
-          </Button>
-          <Button
-            flex={1}
-            size="$3"
-            style={{ backgroundColor: viewMode === 'calendar' ? palette.accent : undefined }}
-            onPress={() => setViewMode('calendar')}
-          >
-            <Text
-              style={{
-                color: viewMode === 'calendar' ? palette.accentInk : palette.inkSoft,
-                fontWeight: '700',
-              }}
-            >
-              Calendar
-            </Text>
-          </Button>
-        </XStack>
+        <AttendanceViewModeToggle viewMode={viewMode} onChange={setViewMode} />
       ) : null}
 
       {viewMode === 'calendar' && days.length > 0 ? <AttendanceCalendar days={days} /> : null}
 
       {viewMode === 'list'
-        ? days.map((day) =>
-            day.date ? (
-              <GlassCard key={day.date}>
-                <XStack style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ color: palette.ink, fontWeight: '600' }}>
-                    {formatDisplayDate(day.date)}
-                  </Text>
-                  {day.status ? (
-                    <StatusBadge status={day.status} isLate={day.isLate ?? false} />
-                  ) : null}
-                </XStack>
-                <Text style={{ color: palette.inkSoft }}>
-                  Check-in: {day.checkIn?.timestamp ? formatPunchTime(day.checkIn.timestamp) : '—'}
-                  {'   '}
-                  Check-out:{' '}
-                  {day.checkOut?.timestamp ? formatPunchTime(day.checkOut.timestamp) : '—'}
-                </Text>
-                {day.hoursWorked != null ? (
-                  <Text style={{ color: palette.inkSoft }}>
-                    Hours worked: {formatHoursWorked(day.hoursWorked)}
-                  </Text>
-                ) : null}
-                {day.checkIn?.latitude != null && day.checkIn.longitude != null ? (
-                  <PunchLocation
-                    latitude={day.checkIn.latitude}
-                    longitude={day.checkIn.longitude}
-                    address={day.checkIn.address}
-                  />
-                ) : null}
-              </GlassCard>
-            ) : null,
-          )
+        ? days.map((day) => (day.date ? <AttendanceDayListItem key={day.date} day={day} /> : null))
         : null}
 
       {!isUnauthorized ? (
