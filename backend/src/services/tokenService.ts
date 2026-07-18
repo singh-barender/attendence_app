@@ -10,11 +10,18 @@
  * proof that the caller just re-entered their password, required by
  * sensitive mutations (`reEnrollFace`/`reEnrollFingerprint`) that a merely
  * *valid* (but possibly hours- or days-old) session token shouldn't be
- * sufficient to authorize on its own. They're single-use: `reEnroll.ts`
- * revokes a step-up token immediately after it authorizes a mutation, via
- * the same `RevokedToken` table session tokens use, so a captured or
- * replayed step-up token can't authorize a second biometric replacement
- * within its 5-minute window (found in a follow-up review of F11).
+ * sufficient to authorize on its own. They're single-use: `assertStepUp`
+ * atomically consumes a step-up token (via `tryConsumeToken`, an
+ * insert-or-detect-conflict on the same `RevokedToken` table session tokens
+ * use) the moment it authorizes a mutation, so a captured or replayed
+ * step-up token can't authorize a second biometric replacement within its
+ * 5-minute window (found in a follow-up review of F11). This consumption is
+ * a plain unique-constraint `create`, not a read-then-write — two concurrent
+ * requests presenting the same token race the database's own unique
+ * constraint on `jti`, not each other's application-level check (a Round 7
+ * review finding: the original "SELECT to check, then upsert" sequence let
+ * both of two concurrent requests observe "not yet revoked" before either
+ * finished revoking, so both were granted access).
  *
  * Session tokens also carry a `jti` (JWT ID) so `logout` can revoke one
  * specific token server-side (architecture-review-2026-07-16.md's F8) —
@@ -37,9 +44,10 @@ import { randomUUID } from 'node:crypto';
 import { jwtVerify, SignJWT } from 'jose';
 import { config } from '../config';
 import { prisma } from '../db/client';
+import { isUniqueConstraintViolation } from '../db/prismaErrors';
 
 const JWT_ALGORITHM = 'HS256';
-const SESSION_DURATION = '7d';
+const SESSION_DURATION = '30d';
 /** Deliberately short — a step-up token proves "the caller just re-entered
  * their password", not "the caller is logged in" (that's what the session
  * token already proves). Long enough to complete a re-enrollment capture
@@ -110,6 +118,30 @@ async function isTokenRevoked(jti: string | null): Promise<boolean> {
   return revoked !== null;
 }
 
+/**
+ * Atomically marks `jti` revoked and reports whether *this* call was the one
+ * that did it — `true` only for whichever of any number of concurrent
+ * callers actually wins. Backs `assertStepUp`'s single-use guarantee: relying
+ * on the `jti` column's own unique constraint (via a plain `create`, catching
+ * `P2002`) means the database itself arbitrates a tie between concurrent
+ * requests presenting the same token, rather than an application-level
+ * SELECT that both requests could pass before either writes (the exact race
+ * a Round 7 review found in the previous `isTokenRevoked`-then-`revokeToken`
+ * sequence).
+ */
+async function tryConsumeToken(jti: string, expiresAt: Date): Promise<boolean> {
+  await prisma.revokedToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  try {
+    await prisma.revokedToken.create({ data: { jti, expiresAt } });
+    return true;
+  } catch (error) {
+    if (isUniqueConstraintViolation(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 export async function issueStepUpToken(userId: string): Promise<string> {
   return new SignJWT({ sub: userId, purpose: STEP_UP_PURPOSE, jti: randomUUID() })
     .setProtectedHeader({ alg: JWT_ALGORITHM })
@@ -159,20 +191,30 @@ export async function verifyStepUpToken(token: string): Promise<StepUpTokenPaylo
  * The shared step-up gate for sensitive, non-reversible account actions
  * (`reEnrollFace`/`reEnrollFingerprint`, `deleteMyAccount`) — verifies the
  * token proves a fresh password confirmation for this exact account, then
- * consumes it (single-use, see `verifyStepUpToken`'s comment) so it can't
- * authorize a second sensitive action from one password entry. Factored out
- * of `reEnroll.ts` once `deleteMyAccount` needed the identical check
- * (account deletion is at least as destructive as re-enrollment, and a
- * follow-up review pointed out it had no server-side step-up gate at all —
- * only a client-side type-to-confirm text match, the same kind of
- * non-boundary F11 already fixed for re-enrollment).
+ * atomically consumes it (single-use, see `tryConsumeToken`) so it can't
+ * authorize a second sensitive action from one password entry, even under
+ * concurrent replay. Factored out of `reEnroll.ts` once `deleteMyAccount`
+ * needed the identical check (account deletion is at least as destructive as
+ * re-enrollment, and a follow-up review pointed out it had no server-side
+ * step-up gate at all — only a client-side type-to-confirm text match, the
+ * same kind of non-boundary F11 already fixed for re-enrollment).
  */
 export async function assertStepUp(userId: string, stepUpToken: string): Promise<void> {
+  const invalidTokenError = new Error(
+    'Invalid or expired step-up confirmation — please re-enter your password.',
+  );
   const { userId: stepUpUserId, jti, exp } = await verifyStepUpToken(stepUpToken);
   if (stepUpUserId !== userId) {
-    throw new Error('Invalid or expired step-up confirmation — please re-enter your password.');
+    throw invalidTokenError;
   }
-  await revokeToken(jti, new Date(exp * 1000));
+  const consumed = await tryConsumeToken(jti, new Date(exp * 1000));
+  if (!consumed) {
+    // Lost the race to a concurrent call presenting the same token (or
+    // `verifyStepUpToken`'s own pre-check somehow missed an already-revoked
+    // row) — treated identically to any other invalid token, not a distinct
+    // error, so a caller can't distinguish "already used" from "never valid."
+    throw invalidTokenError;
+  }
 }
 
 const BEARER_PREFIX = 'Bearer ';
