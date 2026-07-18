@@ -123,21 +123,28 @@ export function assertEnrollmentConsistency(embeddings: FaceEmbeddingsInputShape
   }
 }
 
+/**
+ * `registerStep2`'s write path — delegates to `reEnrollFingerprint`'s own
+ * supersede-then-append transaction (rather than a plain `create`) as
+ * defense-in-depth: `register.ts`'s `assertRegistrationNotComplete` guard is
+ * the primary control against this running more than once for an account,
+ * but should that guard ever be bypassed, this still can't produce two
+ * simultaneously-active `FINGERPRINT_FLAG` rows for the same user (Round 6
+ * review finding).
+ */
 export async function recordFingerprintConfirmation(userId: string): Promise<void> {
-  await prisma.biometricEnrollment.create({
-    data: { userId, type: BIOMETRIC_ENROLLMENT_TYPE.FINGERPRINT_FLAG },
-  });
+  await reEnrollFingerprint(userId);
 }
 
+/** `registerStep3`'s write path — see `recordFingerprintConfirmation`'s
+ * comment; delegates to `reEnrollFace`'s supersede-then-append transaction
+ * for the same defense-in-depth reason. */
 export async function recordFaceEnrollment(
   userId: string,
   embeddings: FaceEmbeddingsInputShape,
   embeddingModel: EmbeddingModelId,
 ): Promise<void> {
-  assertEnrollmentConsistency(embeddings);
-  await prisma.biometricEnrollment.createMany({
-    data: faceEnrollmentCreateData(userId, embeddings, embeddingModel),
-  });
+  await reEnrollFace(userId, embeddings, embeddingModel);
 }
 
 /** Re-enrollment counterpart of `recordFingerprintConfirmation` — supersedes

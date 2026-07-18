@@ -88,6 +88,7 @@ builder.mutationType({
       },
       resolve: async (query, _root, args, ctx) => {
         const userId = requireUserId(ctx);
+        await userService.assertRegistrationNotComplete(userId);
         if (args.fingerprintConfirmed) {
           await enrollmentService.recordFingerprintConfirmation(userId);
         }
@@ -107,6 +108,7 @@ builder.mutationType({
       },
       resolve: async (query, _root, args, ctx) => {
         const userId = requireUserId(ctx);
+        await userService.assertRegistrationNotComplete(userId);
         await enrollmentService.recordFaceEnrollment(userId, args.embeddings, args.embeddingModel);
 
         return prisma.user.update({
