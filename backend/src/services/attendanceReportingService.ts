@@ -37,9 +37,15 @@ export interface AttendanceDaySummary {
   hoursWorked: number | null;
 }
 
-function isLateCheckIn(checkInTimestamp: Date, shiftStartHour: number): boolean {
-  const shiftStart = new Date(checkInTimestamp);
-  shiftStart.setHours(shiftStartHour, 0, 0, 0);
+function isLateCheckIn(
+  checkInTimestamp: Date,
+  shiftStartHour: number,
+  shiftDateString: string,
+): boolean {
+  const [year, month, day] = shiftDateString.split('-').map(Number) as [number, number, number];
+  // Construct the shift start relative to the assigned shift date, not the punch date.
+  // This correctly handles a check-in that lands after midnight (e.g. 00:10 AM check-in for an 11:00 PM shift on the previous calendar date).
+  const shiftStart = new Date(year, month - 1, day, shiftStartHour, 0, 0, 0);
   return checkInTimestamp.getTime() > shiftStart.getTime();
 }
 
@@ -61,7 +67,7 @@ export function deriveDaySummary(
   fullDayHours: number,
   todayDate: string,
 ): AttendanceDaySummary {
-  const isLate = checkIn ? isLateCheckIn(checkIn.timestamp, shiftStartHour) : false;
+  const isLate = checkIn ? isLateCheckIn(checkIn.timestamp, shiftStartHour, date) : false;
 
   if (!checkIn || !checkOut) {
     const isOpenToday = Boolean(checkIn) && !checkOut && date === todayDate;

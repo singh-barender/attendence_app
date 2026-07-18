@@ -35,11 +35,15 @@
  * meaningless score. An account enrolled on one platform but verifying on
  * the other now gets a clear, actionable message instead.
  *
- * `idempotencyKey` (F7) is optional — supplying one lets `recordPunch`
- * recognize a retried offline mutation that actually already succeeded
- * (response lost in transit) and return the original record instead of
- * re-inferring punch type against now-changed state. See the column comment
- * in schema.prisma and `recordPunch`'s own doc comment.
+ * `idempotencyKey` (F7) is optional — supplying one lets a retried offline
+ * mutation that actually already succeeded (response lost in transit) return
+ * the original record instead of re-inferring punch type against now-changed
+ * state. Each resolver checks `findPunchByIdempotencyKey` itself, first
+ * thing, before any liveness/enrollment work or audit logging (Round 6
+ * review finding) — `recordPunch` also checks it again internally as the
+ * actual write-path safeguard against a race between two concurrent
+ * replays. See the column comment in schema.prisma and
+ * `findPunchByIdempotencyKey`/`recordPunch`'s own doc comments.
  *
  * Neither mutation issues a session token anymore (a follow-up review
  * finding on F7/F8): both require an already-authenticated session to be
@@ -133,6 +137,23 @@ builder.mutationField('punchInFingerprint', (t) =>
     resolve: async (_root, args, ctx): Promise<PunchInResultShape> => {
       const userId = String(args.userId);
       assertPunchIdentity(ctx, userId);
+
+      // Checked before any liveness/enrollment work or audit logging (Round
+      // 6 review finding) — a replayed idempotency key means this exact
+      // attempt already succeeded once; returning the cached record here
+      // skips re-running verification *and* re-logging a SUCCESS attempt,
+      // so a network retry can never inflate the audit trail with a
+      // phantom extra "verified again" event.
+      if (args.idempotencyKey) {
+        const existing = await attendanceService.findPunchByIdempotencyKey(
+          userId,
+          args.idempotencyKey,
+        );
+        if (existing) {
+          return { record: existing.record, type: existing.type, matched: true, bestScore: null };
+        }
+      }
+
       const { fingerprintEnrolled } = await enrollmentService.getEnrollmentStatus(userId);
 
       if (!fingerprintEnrolled) {
@@ -183,6 +204,23 @@ builder.mutationField('punchInFace', (t) =>
     resolve: async (_root, args, ctx): Promise<PunchInResultShape> => {
       const userId = String(args.userId);
       assertPunchIdentity(ctx, userId);
+
+      // See the matching check in `punchInFingerprint` above — same reason,
+      // checked before liveness/match work and before any audit logging.
+      if (args.idempotencyKey) {
+        const existing = await attendanceService.findPunchByIdempotencyKey(
+          userId,
+          args.idempotencyKey,
+        );
+        if (existing) {
+          return {
+            record: existing.record,
+            type: existing.type,
+            matched: true,
+            bestScore: existing.record.matchScore,
+          };
+        }
+      }
 
       const livenessPassed = judgeLiveness(
         args.livenessChallengeType,

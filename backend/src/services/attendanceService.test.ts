@@ -15,24 +15,29 @@ import {
 } from './attendanceService';
 
 describe('inferNextPunchType', () => {
-  it('returns CHECK_IN when there are no punches yet today', () => {
-    expect(inferNextPunchType([])).toBe(PUNCH_TYPE.CHECK_IN);
+  it('returns CHECK_IN when there is no prior punch at all', () => {
+    expect(inferNextPunchType(null, null)).toBe(PUNCH_TYPE.CHECK_IN);
   });
 
-  it('returns CHECK_OUT after a CHECK_IN', () => {
-    expect(inferNextPunchType([PUNCH_TYPE.CHECK_IN])).toBe(PUNCH_TYPE.CHECK_OUT);
+  it('returns CHECK_OUT when the most recent punch was a CHECK_IN less than 16 hours ago', () => {
+    expect(inferNextPunchType(PUNCH_TYPE.CHECK_IN, 5)).toBe(PUNCH_TYPE.CHECK_OUT);
   });
 
-  it('throws once both CHECK_IN and CHECK_OUT are recorded', () => {
-    expect(() => inferNextPunchType([PUNCH_TYPE.CHECK_IN, PUNCH_TYPE.CHECK_OUT])).toThrow(
-      /already checked out/i,
-    );
+  it('returns CHECK_IN when the most recent punch was a CHECK_IN more than 16 hours ago (abandoned shift)', () => {
+    expect(inferNextPunchType(PUNCH_TYPE.CHECK_IN, 17)).toBe(PUNCH_TYPE.CHECK_IN);
   });
 
-  it('is order-independent (CHECK_OUT recorded before CHECK_IN in the array)', () => {
-    expect(() => inferNextPunchType([PUNCH_TYPE.CHECK_OUT, PUNCH_TYPE.CHECK_IN])).toThrow(
-      /already checked out/i,
-    );
+  // Round 7 review finding: this used to group "today's" punches by
+  // calendar date instead of looking at the single most recent one — a
+  // shift crossing midnight (9pm check-in, 5am check-out) fell on two
+  // different dates, so the 5am departure was misread as a fresh CHECK_IN
+  // for an "empty" new day rather than the CHECK_OUT it actually was. This
+  // function no longer takes a date at all, so there's no longer a calendar
+  // boundary to get that wrong at — the fix is structural, not a special
+  // case bolted onto the old signature (the integration test in app.test.ts
+  // exercises the actual midnight-crossing scenario end-to-end).
+  it('returns CHECK_IN when the most recent punch was a CHECK_OUT (starting a new shift)', () => {
+    expect(inferNextPunchType(PUNCH_TYPE.CHECK_OUT, 12)).toBe(PUNCH_TYPE.CHECK_IN);
   });
 });
 

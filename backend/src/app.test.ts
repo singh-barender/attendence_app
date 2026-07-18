@@ -239,12 +239,18 @@ describe('backend integration', () => {
     );
     expect(checkOut.data?.punchInFingerprint.type).toBe('CHECK_OUT');
 
+    // A third punch, same calendar day, right after a completed CHECK_OUT —
+    // inference no longer rejects this outright (Round 7 review finding:
+    // type-inference is now a plain alternation with no same-day cap, so
+    // this is read as *starting a new shift*, not a rejected duplicate) —
+    // but the DB's own `@@unique([userId, date, type])` constraint still
+    // catches the same-day CHECK_IN collision, surfacing a clear error.
     const duplicate = await graphql(
       'mutation($userId:ID!){ punchInFingerprint(userId:$userId){ type } }',
       { userId },
       token,
     );
-    expect(duplicate.errors?.[0]?.message).toMatch(/already checked out/i);
+    expect(duplicate.errors?.[0]?.message).toMatch(/already punched in/i);
 
     const historyNoAuth = await graphql('{ attendanceHistory { date } }');
     expect(historyNoAuth.errors?.[0]?.message).toMatch(/unauthorized/i);
@@ -300,6 +306,14 @@ describe('backend integration', () => {
     // Confirms the replay didn't actually write a second row.
     const records = await prisma.attendanceRecord.findMany({ where: { userId } });
     expect(records).toHaveLength(1);
+
+    // The replay must not have logged a second SUCCESS verification attempt
+    // — audit log corruption via idempotency bypass (Round 6 review finding:
+    // the original ordering logged SUCCESS on every replay, before the
+    // idempotency short-circuit was ever reached).
+    const attempts = await prisma.verificationAttempt.findMany({ where: { userId } });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe('SUCCESS');
 
     // A genuinely new attempt (fresh key) still works normally as a real
     // CHECK_OUT.
@@ -431,6 +445,81 @@ describe('backend integration', () => {
     expect(day?.isLate).toBe(false);
   });
 
+  it('correctly infers CHECK_OUT for a shift crossing midnight, reported as one same-day pair (Round 7 review finding)', async () => {
+    const { userId, token } = await registerAndLogin('Night Shift', 'night.shift@example.com');
+    await enrollFingerprint(token);
+
+    // A 9pm-to-5am shift — the check-in and check-out land on two different
+    // calendar dates. Before this fix, `determineNextPunchType` grouped
+    // punches by the exact `date` of the current punch, so the 5am departure
+    // found no records yet for *its own* (new) day and was misread as a
+    // fresh CHECK_IN — the real CHECK_OUT was silently dropped, the 9pm
+    // shift stayed open forever, and the new day opened with a phantom
+    // check-in.
+    const checkInAt = new Date();
+    checkInAt.setDate(checkInAt.getDate() - 1);
+    checkInAt.setHours(21, 0, 0, 0);
+    const checkOutAt = new Date();
+    checkOutAt.setHours(5, 0, 0, 0);
+    const shiftDate = `${checkInAt.getFullYear()}-${String(checkInAt.getMonth() + 1).padStart(2, '0')}-${String(checkInAt.getDate()).padStart(2, '0')}`;
+    const nextCalendarDate = `${checkOutAt.getFullYear()}-${String(checkOutAt.getMonth() + 1).padStart(2, '0')}-${String(checkOutAt.getDate()).padStart(2, '0')}`;
+
+    const checkIn = await graphql<{
+      punchInFingerprint: { type: string; record: { date: string } };
+    }>(
+      'mutation($userId:ID!,$ts:DateTime!){ punchInFingerprint(userId:$userId,clientTimestamp:$ts){ type record { date } } }',
+      { userId, ts: checkInAt.toISOString() },
+      token,
+    );
+    expect(checkIn.data?.punchInFingerprint.type).toBe('CHECK_IN');
+    expect(checkIn.data?.punchInFingerprint.record.date).toBe(shiftDate);
+
+    const checkOut = await graphql<{
+      punchInFingerprint: { type: string; record: { date: string } };
+    }>(
+      'mutation($userId:ID!,$ts:DateTime!){ punchInFingerprint(userId:$userId,clientTimestamp:$ts){ type record { date } } }',
+      { userId, ts: checkOutAt.toISOString() },
+      token,
+    );
+    // The actual fix under test: this must be CHECK_OUT, not a phantom
+    // CHECK_IN for `nextCalendarDate`.
+    expect(checkOut.data?.punchInFingerprint.type).toBe('CHECK_OUT');
+    // Attributed back to the shift's own start day, not the day it happens
+    // to end on — what keeps the pair grouped together for reporting.
+    expect(checkOut.data?.punchInFingerprint.record.date).toBe(shiftDate);
+
+    const history = await graphql<{
+      attendanceHistory: {
+        date: string;
+        status: string;
+        hoursWorked: number | null;
+        checkIn: { type: string } | null;
+        checkOut: { type: string } | null;
+      }[];
+    }>(
+      '{ attendanceHistory { date status hoursWorked checkIn { type } checkOut { type } } }',
+      undefined,
+      token,
+    );
+
+    // Exactly one day summary for this shift — reported under the shift's
+    // start date, not split across two entries.
+    const shiftDay = history.data?.attendanceHistory.find((entry) => entry.date === shiftDate);
+    const phantomDay = history.data?.attendanceHistory.find(
+      (entry) => entry.date === nextCalendarDate,
+    );
+    expect(phantomDay).toBeUndefined();
+    expect(shiftDay?.checkIn?.type).toBe('CHECK_IN');
+    expect(shiftDay?.checkOut?.type).toBe('CHECK_OUT');
+    expect(shiftDay?.status).not.toBe('OPEN');
+    expect(shiftDay?.status).not.toBe('MISSED');
+    expect(shiftDay?.hoursWorked).toBeCloseTo(8, 1);
+
+    const records = await prisma.attendanceRecord.findMany({ where: { userId } });
+    expect(records).toHaveLength(2);
+    expect(records.every((record) => record.date === shiftDate)).toBe(true);
+  });
+
   it('ignores a wildly divergent client timestamp and falls back to server-received time', async () => {
     const { userId, token } = await registerAndLogin(
       'Bad Client Clock',
@@ -494,6 +583,52 @@ describe('backend integration', () => {
     expect(attempts[0]?.method).toBe('FACE');
   });
 
+  it('replaying a face punch with the same idempotency key does not re-log a verification attempt (Round 6 review finding)', async () => {
+    const { userId, token } = await registerAndLogin(
+      'Face Idempotent',
+      'face.idempotent@example.com',
+    );
+    const embedding = [1, 0, 0];
+    await enrollFace(token, embedding);
+
+    const FACE_PUNCH_WITH_KEY = `mutation($userId:ID!,$emb:[Float!]!,$m:EmbeddingModel!,$type:LivenessChallengeType!,$samples:[LivenessSampleInput!]!,$k:String!){ punchInFace(userId:$userId,embedding:$emb,embeddingModel:$m,livenessChallengeType:$type,livenessSamples:$samples,idempotencyKey:$k){ record { id } } }`;
+    const variables = {
+      userId,
+      emb: embedding,
+      m: TEST_EMBEDDING_MODEL,
+      type: 'BLINK',
+      samples: VALID_LIVENESS_SAMPLES,
+      k: 'face-idempotency-key-1',
+    };
+
+    const first = await graphql<{ punchInFace: { record: { id: string } } }>(
+      FACE_PUNCH_WITH_KEY,
+      variables,
+      token,
+    );
+    const originalId = first.data?.punchInFace.record.id;
+    expect(originalId).toBeTruthy();
+
+    // Same idempotency key, same embedding/liveness samples — simulating a
+    // network retry of a request that actually already succeeded. Before
+    // this fix, this replay would still re-run liveness/match and log a
+    // second SUCCESS `VerificationAttempt` row even though `recordPunch`
+    // itself correctly deduplicated the `AttendanceRecord`.
+    const replay = await graphql<{ punchInFace: { record: { id: string } } }>(
+      FACE_PUNCH_WITH_KEY,
+      variables,
+      token,
+    );
+    expect(replay.data?.punchInFace.record.id).toBe(originalId);
+
+    const attempts = await prisma.verificationAttempt.findMany({ where: { userId } });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe('SUCCESS');
+
+    const records = await prisma.attendanceRecord.findMany({ where: { userId } });
+    expect(records).toHaveLength(1);
+  });
+
   it('rejects a face punch-in whose liveness samples never show a completed blink (F1)', async () => {
     const { userId, token } = await registerAndLogin('No Blink', 'no.blink@example.com');
     const embedding = [1, 0, 0];
@@ -553,6 +688,66 @@ describe('backend integration', () => {
 
     const records = await prisma.attendanceRecord.findMany({ where: { userId } });
     expect(records).toHaveLength(0);
+  });
+
+  it('rejects re-calling registerStep2/registerStep3 once registration is already complete (Round 6 review finding)', async () => {
+    const { userId, token } = await registerAndLogin(
+      'Already Registered',
+      'already.registered@example.com',
+    );
+    await enrollFingerprint(token);
+    const originalEmbedding = [1, 0, 0];
+    await enrollFace(token, originalEmbedding);
+
+    // Registration is now fully complete (registrationStep 3). A still-valid
+    // session token — with no step-up — must not be able to silently append
+    // a second fingerprint confirmation or replace the face enrollment; that
+    // replacement path is only supposed to be reachable via the step-up-
+    // gated reEnrollFingerprint/reEnrollFace mutations (ADR-030).
+    const replayStep2 = await graphql(
+      'mutation($fp:Boolean!){ registerStep2(fingerprintConfirmed:$fp){ registrationStep } }',
+      { fp: true },
+      token,
+    );
+    expect(replayStep2.errors?.[0]?.message).toMatch(/already complete/i);
+
+    const newEmbedding = [0, 1, 0];
+    const replayStep3 = await graphql(
+      'mutation($e:FaceEmbeddingsInput!,$m:EmbeddingModel!){ registerStep3(embeddings:$e,embeddingModel:$m){ registrationStep } }',
+      {
+        e: {
+          left: nudged(newEmbedding, LEFT_NUDGE),
+          right: nudged(newEmbedding, RIGHT_NUDGE),
+          frontal: newEmbedding,
+        },
+        m: TEST_EMBEDDING_MODEL,
+      },
+      token,
+    );
+    expect(replayStep3.errors?.[0]?.message).toMatch(/already complete/i);
+
+    // Neither rejected call appended or superseded anything.
+    const fingerprintRows = await prisma.biometricEnrollment.findMany({
+      where: { userId, type: 'FINGERPRINT_FLAG' },
+    });
+    expect(fingerprintRows).toHaveLength(1);
+    expect(fingerprintRows[0]?.supersededAt).toBeNull();
+
+    const faceRows = await prisma.biometricEnrollment.findMany({
+      where: { userId, type: { in: ['FACE_LEFT', 'FACE_RIGHT', 'FACE_FRONTAL'] } },
+    });
+    expect(faceRows).toHaveLength(3);
+    expect(faceRows.every((row) => row.supersededAt === null)).toBe(true);
+
+    // The original face enrollment still matches — proving the rejected
+    // replay never got as far as superseding it with the new embedding.
+    const punch = await punchInFace<{ punchInFace: { matched: boolean } }>(
+      token,
+      userId,
+      originalEmbedding,
+      'matched',
+    );
+    expect(punch.data?.punchInFace.matched).toBe(true);
   });
 
   it('re-enrolling face supersedes the old embedding so it no longer matches at punch-in', async () => {
@@ -677,6 +872,48 @@ describe('backend integration', () => {
     expect(replay.errors?.[0]?.message).toMatch(/step-up/i);
 
     // Confirms the replay didn't sneak through a second supersede.
+    const rows = await prisma.biometricEnrollment.findMany({
+      where: { type: 'FINGERPRINT_FLAG' },
+    });
+    expect(rows.filter((row) => row.supersededAt === null)).toHaveLength(1);
+  });
+
+  it('rejects a truly concurrent replay of the same step-up token — atomic single-use, not a check-then-act race (Round 7 review finding)', async () => {
+    const { token } = await registerAndLogin(
+      'StepUp Concurrent Replay',
+      'stepup-concurrent-replay@example.com',
+    );
+    await enrollFingerprint(token);
+    const stepUpToken = await confirmStepUp(token);
+
+    const REENROLL_FINGERPRINT_MUTATION =
+      'mutation($s:String!){ reEnrollFingerprint(stepUpToken:$s){ fingerprintEnrolled } }';
+
+    // Both requests present the exact same stepUpToken and are fired without
+    // awaiting either first — the scenario the original "SELECT to check
+    // isTokenRevoked, then upsert via revokeToken" sequence got wrong: both
+    // could observe "not yet revoked" before either finished writing.
+    // Exactly one of these must succeed.
+    const [first, second] = await Promise.all([
+      graphql<{ reEnrollFingerprint: { fingerprintEnrolled: boolean } }>(
+        REENROLL_FINGERPRINT_MUTATION,
+        { s: stepUpToken },
+        token,
+      ),
+      graphql<{ reEnrollFingerprint: { fingerprintEnrolled: boolean } }>(
+        REENROLL_FINGERPRINT_MUTATION,
+        { s: stepUpToken },
+        token,
+      ),
+    ]);
+    const outcomes = [first, second];
+    const successes = outcomes.filter((result) => result.errors === undefined);
+    const failures = outcomes.filter((result) => result.errors !== undefined);
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.errors?.[0]?.message).toMatch(/step-up/i);
+
+    // Confirms the loser never got as far as a second supersede.
     const rows = await prisma.biometricEnrollment.findMany({
       where: { type: 'FINGERPRINT_FLAG' },
     });

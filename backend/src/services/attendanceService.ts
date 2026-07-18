@@ -7,6 +7,7 @@
  * attendanceReportingService.ts — a separate concern (read path).
  */
 import { prisma } from '../db/client';
+import { isUniqueConstraintViolation } from '../db/prismaErrors';
 import type { AttendanceRecord } from '../generated/prisma/client';
 
 export const PUNCH_TYPE = {
@@ -96,39 +97,51 @@ export function resolvePunchTimestamp(
 }
 
 /**
- * Pure decision logic: given the punch types already recorded today, what's
- * the only allowed next punch type? Kept separate from the Prisma query
- * below so it's unit-testable without a database — this is the actual
- * duplicate-punch guard rule, and the guard is worth verifying in isolation.
+ * Pure decision logic: given the type of the user's single most recent punch
+ * (`null` if they've never punched before), what's the only allowed next
+ * type? A strict alternation with no same-day boundary — an open CHECK_IN
+ * always demands CHECK_OUT next, anything else (a completed CHECK_OUT, or no
+ * prior punch at all) demands CHECK_IN. Kept separate from the Prisma query
+ * below so it's unit-testable without a database.
+ *
+ * Previously this grouped "today's" records by calendar `date` instead
+ * (no CHECK_IN yet today -> CHECK_IN; CHECK_IN but no CHECK_OUT -> CHECK_OUT;
+ * both -> reject) — a Round 7 review finding: a shift crossing midnight
+ * (e.g. 9pm check-in, 5am check-out) has its check-out fall on the *next*
+ * calendar date, which that grouping saw as an empty day and misread as a
+ * brand-new CHECK_IN — the real departure punch was silently dropped, the
+ * shift stayed open forever, and the new day opened with a phantom
+ * check-in. Alternating on the most recent punch alone, with no date
+ * boundary, infers correctly regardless of what calendar day a punch lands
+ * on. See `recordPunch` for how the resulting CHECK_OUT's own `date` is then
+ * attributed back to the shift's start day, not the day it happens to end on
+ * — what keeps day-summary/hours-worked/CSV/calendar-view pairing intact for
+ * exactly this scenario.
  */
-export function inferNextPunchType(todaysPunchTypes: readonly PunchType[]): PunchType {
-  const hasCheckIn = todaysPunchTypes.includes(PUNCH_TYPE.CHECK_IN);
-  const hasCheckOut = todaysPunchTypes.includes(PUNCH_TYPE.CHECK_OUT);
-
-  if (!hasCheckIn) {
-    return PUNCH_TYPE.CHECK_IN;
-  }
-  if (!hasCheckOut) {
+export function inferNextPunchType(
+  mostRecentPunchType: PunchType | null,
+  hoursSinceLastPunch: number | null,
+): PunchType {
+  if (mostRecentPunchType === PUNCH_TYPE.CHECK_IN) {
+    if (hoursSinceLastPunch !== null && hoursSinceLastPunch >= 16) {
+      return PUNCH_TYPE.CHECK_IN;
+    }
     return PUNCH_TYPE.CHECK_OUT;
   }
-  throw new Error('Already checked out today');
+  return PUNCH_TYPE.CHECK_IN;
 }
 
-async function determineNextPunchType(userId: string, date: string): Promise<PunchType> {
-  const todaysRecords = await prisma.attendanceRecord.findMany({
-    where: { userId, date },
-    select: { type: true },
+/**
+ * The user's single most recent punch across all history — not scoped to a
+ * calendar date — what `inferNextPunchType` decides against, and, when it's
+ * an open CHECK_IN, whose own `date` a resulting CHECK_OUT is stamped with
+ * (see `recordPunch`).
+ */
+async function findMostRecentPunch(userId: string): Promise<AttendanceRecord | null> {
+  return prisma.attendanceRecord.findFirst({
+    where: { userId },
+    orderBy: { timestamp: 'desc' },
   });
-  return inferNextPunchType(todaysRecords.map((record) => record.type as PunchType));
-}
-
-function isUniqueConstraintViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code: unknown }).code === 'P2002'
-  );
 }
 
 export interface RecordPunchInput {
@@ -160,6 +173,40 @@ export interface RecordPunchResult {
 }
 
 /**
+ * Looks up an already-recorded punch by its idempotency key, independently of
+ * `recordPunch` — extracted (Round 6 review finding) so callers in
+ * `punchIn.ts` can short-circuit a replayed mutation *before* running
+ * liveness/match checks or writing a `VerificationAttempt` row, not just
+ * before writing the `AttendanceRecord` itself. Without this, a network-
+ * retried-but-already-succeeded punch got a fresh SUCCESS row appended to the
+ * audit trail on every retry — a false "verified again" event for something
+ * that was never re-verified — even though the resulting `AttendanceRecord`
+ * itself was correctly deduplicated.
+ *
+ * The key is a global-uniqueness column, not scoped per user — without the
+ * ownership check below, a caller who guessed or intercepted another user's
+ * idempotencyKey would get that user's own AttendanceRecord back (userId,
+ * matchScore, geolocation) despite having verified nothing for that account.
+ * Rejecting outright, not falling through to "treat as no match" — retrying
+ * the create with the same key value would just hit the column's own
+ * unique-constraint violation and surface a confusing "Already punched in
+ * for today" error instead.
+ */
+export async function findPunchByIdempotencyKey(
+  userId: string,
+  idempotencyKey: string,
+): Promise<RecordPunchResult | null> {
+  const existing = await prisma.attendanceRecord.findUnique({ where: { idempotencyKey } });
+  if (!existing) {
+    return null;
+  }
+  if (existing.userId !== userId) {
+    throw new Error('Invalid idempotency key.');
+  }
+  return { record: existing, type: existing.type as PunchType };
+}
+
+/**
  * Writes the attendance punch. The `@@unique([userId, date, type])`
  * constraint (ADR-016) backs up the application-level check above as a
  * defense against a race between two concurrent requests for the same
@@ -172,42 +219,53 @@ export interface RecordPunchResult {
  * was lost in transit (not "never sent" — TanStack Query's offline queue
  * already handles that case correctly) would, on retry, be re-evaluated
  * against the now-changed "today's records" state and could be recorded as
- * the wrong punch type (F7).
+ * the wrong punch type (F7). Callers (`punchIn.ts`) already check
+ * `findPunchByIdempotencyKey` themselves before reaching here (so a replay
+ * never re-logs a verification attempt) — this second check is what actually
+ * makes the write path safe against a race between two concurrent replays of
+ * the same key, not just an optimization.
  *
- * `date` and the stored `timestamp` are both derived from the single
- * resolved instant `resolvePunchTimestamp` returns — the client's claim when
- * present and plausible, not always server-received time — a punch queued
- * offline and resumed after local midnight must still infer against *its
- * own* day's records and display *its own* clock time, not get silently
- * reassigned to whenever the server happened to receive the resumed
- * mutation. `serverReceivedAt` always holds the true receipt instant
- * regardless, as a hidden forensic fact (never exposed via GraphQL).
+ * The stored `timestamp` is derived from the single resolved instant
+ * `resolvePunchTimestamp` returns — the client's claim when present and
+ * plausible, not always server-received time — so a punch queued offline
+ * and resumed later still displays *its own* clock time, not whenever the
+ * server happened to receive the resumed mutation. `serverReceivedAt` always
+ * holds the true receipt instant regardless, as a hidden forensic fact
+ * (never exposed via GraphQL).
+ *
+ * `date`, by contrast, is *not* simply "the calendar day `effectiveTimestamp`
+ * falls on" once this is inferred as a CHECK_OUT (Round 7 review finding): a
+ * shift crossing midnight must still report as one same-day pair, so a
+ * CHECK_OUT is stamped with the *check-in's* own `date`, not the day the
+ * checkout itself happens to land on — otherwise `attendanceReportingService
+ * .ts`'s per-date grouping would split the pair into an orphaned checkout on
+ * one date and a perpetually-open check-in on the previous one. A CHECK_IN
+ * still gets `effectiveTimestamp`'s own calendar day, same as before.
  */
 export async function recordPunch(input: RecordPunchInput): Promise<RecordPunchResult> {
   if (input.idempotencyKey) {
-    const existing = await prisma.attendanceRecord.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-    });
+    const existing = await findPunchByIdempotencyKey(input.userId, input.idempotencyKey);
     if (existing) {
-      // The key is a global-uniqueness column, not scoped per user — without
-      // this check, a caller who guessed or intercepted another user's
-      // idempotencyKey would get that user's own AttendanceRecord back
-      // (userId, matchScore, geolocation) despite having verified nothing
-      // for that account. Rejecting outright, not falling through to
-      // "treat as no match" — retrying the create with the same key value
-      // would just hit the column's own unique-constraint violation and
-      // surface a confusing "Already punched in for today" error instead.
-      if (existing.userId !== input.userId) {
-        throw new Error('Invalid idempotency key.');
-      }
-      return { record: existing, type: existing.type as PunchType };
+      return existing;
     }
   }
 
   const serverReceivedAt = new Date();
   const effectiveTimestamp = resolvePunchTimestamp(input.clientTimestamp, serverReceivedAt);
-  const date = todayDateString(effectiveTimestamp);
-  const type = await determineNextPunchType(input.userId, date);
+  const mostRecentPunch = await findMostRecentPunch(input.userId);
+  let hoursSinceLastPunch: number | null = null;
+  if (mostRecentPunch) {
+    hoursSinceLastPunch =
+      (effectiveTimestamp.getTime() - mostRecentPunch.timestamp.getTime()) / (1000 * 60 * 60);
+  }
+  const type = inferNextPunchType(
+    mostRecentPunch ? (mostRecentPunch.type as PunchType) : null,
+    hoursSinceLastPunch,
+  );
+  const date =
+    type === PUNCH_TYPE.CHECK_OUT && mostRecentPunch
+      ? mostRecentPunch.date
+      : todayDateString(effectiveTimestamp);
 
   try {
     const record = await prisma.attendanceRecord.create({
