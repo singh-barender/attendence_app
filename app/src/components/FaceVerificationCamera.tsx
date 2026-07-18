@@ -92,7 +92,15 @@ export function FaceVerificationCamera({
   }
 
   if (!hasDevice) {
-    return <FeedbackBanner variant="error" message="No front camera was found on this device." />;
+    return (
+      <YStack gap="$2">
+        <FeedbackBanner variant="error" message="No front camera was found on this device." />
+        {canSwitchToFingerprint ? (
+          <Button onPress={onSwitchToFingerprint}>Use Fingerprint Instead</Button>
+        ) : null}
+        <Button onPress={onCancel}>Cancel</Button>
+      </YStack>
+    );
   }
 
   return (

@@ -38,6 +38,7 @@ export function AuthLoginScreen({ navigation, route }: RootScreenProps<'Login'>)
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [hasStoredToken, setHasStoredToken] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   function routeAfterAuth(
     registrationStep: number | null | undefined,
@@ -61,6 +62,8 @@ export function AuthLoginScreen({ navigation, route }: RootScreenProps<'Login'>)
       if (token) {
         setAuthToken(token);
         setHasStoredToken(true);
+      } else {
+        setIsInitializing(false);
       }
     });
   }, []);
@@ -77,11 +80,15 @@ export function AuthLoginScreen({ navigation, route }: RootScreenProps<'Login'>)
   // redundant re-runs without changing behavior.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
-    if (!hasStoredToken || !isMeFetched) {
+    if (!hasStoredToken) {
+      return;
+    }
+    if (!isMeFetched) {
       return;
     }
     const me = meData?.me;
     if (!me?.id || !me.email) {
+      setIsInitializing(false);
       return;
     }
     routeAfterAuth(me.registrationStep, me.id, me.email);
@@ -113,6 +120,14 @@ export function AuthLoginScreen({ navigation, route }: RootScreenProps<'Login'>)
     }
     setFormError(null);
     mutate({ email: email.trim(), password });
+  }
+
+  if (isInitializing) {
+    return (
+      <YStack flex={1} style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <Spinner size="large" />
+      </YStack>
+    );
   }
 
   return (
