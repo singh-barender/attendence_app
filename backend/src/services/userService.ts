@@ -32,3 +32,25 @@ export async function assertEmailNotRegistered(email: string): Promise<void> {
     throw new Error('An account with this email already exists');
   }
 }
+
+/**
+ * Blocks `registerStep2`/`registerStep3` from being called again once the
+ * wizard has already finished (`registrationStep === 3`) — a Round 6 review
+ * finding: both steps resolve the account from the session token alone
+ * (no step-up), so without this guard a still-valid session token (e.g.
+ * leaked, or a device left unlocked) could silently append a brand-new
+ * fingerprint confirmation or a brand-new set of face embeddings to an
+ * already-fully-registered account — the exact biometric replacement
+ * `reEnrollFingerprint`/`reEnrollFace` deliberately gate behind step-up
+ * re-authentication (ADR-030), bypassed entirely via this back door. Steps
+ * 1-2 of the wizard stay freely (re-)callable so a genuinely resumed/retried
+ * registration is unaffected.
+ */
+export async function assertRegistrationNotComplete(userId: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (user && user.registrationStep >= 3) {
+    throw new Error(
+      'Registration is already complete for this account — use re-enrollment from your profile to update biometrics instead.',
+    );
+  }
+}

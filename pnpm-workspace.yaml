@@ -124,3 +124,6 @@ minimumReleaseAgeExclude:
   - expo-modules-jsi@57.0.1
   - expo@57.0.4
   - react-native-vision-camera-face-detector@2.0.5
+
+patchedDependencies:
+  react-native-vision-camera-face-detector: patches/react-native-vision-camera-face-detector.patch

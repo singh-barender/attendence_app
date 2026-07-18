@@ -120,13 +120,20 @@ model AttendanceRecord {
   // caller that doesn't supply one.
   idempotencyKey String? @unique
 
-  // Punch-type inference and the duplicate-punch guard both query "this user's
-  // records for today" (ADR-016) — indexed for that lookup. The unique
-  // constraint is the DB-level backstop for the same guard: the application
-  // check alone has a race window between two concurrent requests for the
-  // same user/day/type; this makes a duplicate impossible even then.
+  // The CSV export date-range preset and `getAttendanceHistory`'s grouping
+  // both query "this user's records in/around a date" (ADR-016) — indexed
+  // for that lookup. The unique constraint is the DB-level backstop for the
+  // duplicate-punch guard: the application check alone has a race window
+  // between two concurrent requests for the same user/day/type; this makes
+  // a duplicate impossible even then.
   @@index([userId, date])
   @@unique([userId, date, type])
+  // Punch-type inference (`findMostRecentPunch`, Round 7 review finding) no
+  // longer scopes to a calendar date at all — it looks at this user's single
+  // most recent punch across all history, so a shift crossing midnight
+  // infers correctly — indexed separately since that query orders by
+  // `timestamp`, not `date`.
+  @@index([userId, timestamp])
 }
 
 model VerificationAttempt {

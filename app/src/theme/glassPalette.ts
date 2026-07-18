@@ -1,12 +1,12 @@
 /**
- * Single source of truth for the app-wide "glass card over a colorful
- * gradient" visual identity (user-requested redesign) — every color used by
- * `GradientBackground`/`GlassCard`/`IconInput` comes from here, so no
- * component hardcodes a hex value independently. Light and dark are each a
- * deliberately separate, tuned palette (same hue journey, different
- * luminance/saturation) rather than one inverted into the other, so the
- * existing theme toggle (task 4.7) keeps giving an equally-designed result
- * in both directions.
+ * Single source of truth for the app-wide "glass card over a neutral
+ * charcoal/white/grey gradient" visual identity (user-requested redesign)
+ * — every color used by `GradientBackground`/`GlassCard`/`IconInput` comes
+ * from here, so no component hardcodes a hex value independently. Light and
+ * dark are each a deliberately separate, tuned palette (same neutral,
+ * hueless tone journey, different luminance) rather than one inverted into
+ * the other, so the existing theme toggle (task 4.7) keeps giving an
+ * equally-designed result in both directions.
  */
 import type { BlurTint } from 'expo-blur';
 
@@ -37,30 +37,47 @@ export interface GlassPalette {
 }
 
 const DARK: GlassPalette = {
-  gradientStops: ['#F2994A', '#8E54E9', '#4A6FE8', '#D9498B', '#E85D4A'],
-  glassSurface: 'rgba(20, 18, 30, 0.55)',
-  glassBorder: 'rgba(255, 255, 255, 0.14)',
+  // Deep graphite with a subtle cool tint
+  gradientStops: ['#2B2C30', '#1E1F23', '#121316', '#1A1B1F', '#303238'],
+
+  // More transparent so the blur actually shows through
+  glassSurface: 'rgba(255, 255, 255, 0.08)',
+
+  // Brighter edge gives the illusion of real glass
+  glassBorder: 'rgba(255, 255, 255, 0.16)',
+
   blurTint: 'dark',
-  blurIntensity: 40,
-  ink: '#F3F1F7',
-  inkSoft: 'rgba(243, 241, 247, 0.65)',
-  accent: '#B79CFF',
-  accentInk: '#241B33',
-  danger: '#E5534B',
+  blurIntensity: 70,
+
+  ink: '#F7F8FA',
+  inkSoft: 'rgba(247,248,250,0.72)',
+
+  // Less saturated purple
+  accent: '#8F7CFF',
+  accentInk: '#FFFFFF',
+
+  danger: '#E05D5D',
   dangerInk: '#FFFFFF',
 };
 
 const LIGHT: GlassPalette = {
-  gradientStops: ['#FFD9B3', '#D8C6F5', '#BFD4FF', '#F7C6DE', '#FFC9B8'],
-  glassSurface: 'rgba(255, 255, 255, 0.55)',
-  glassBorder: 'rgba(36, 27, 51, 0.10)',
+  gradientStops: ['#FFFFFF', '#F8F9FB', '#EFF1F5', '#E8EBF0', '#F6F7F9'],
+
+  // Real glass should be translucent
+  glassSurface: 'rgba(255,255,255,0.38)',
+
+  glassBorder: 'rgba(255,255,255,0.60)',
+
   blurTint: 'light',
-  blurIntensity: 50,
-  ink: '#241B33',
-  inkSoft: 'rgba(36, 27, 51, 0.62)',
-  accent: '#6B3FD1',
+  blurIntensity: 80,
+
+  ink: '#1E2026',
+  inkSoft: 'rgba(30,32,38,0.62)',
+
+  accent: '#6754F6',
   accentInk: '#FFFFFF',
-  danger: '#B3261E',
+
+  danger: '#C93B3B',
   dangerInk: '#FFFFFF',
 };
 

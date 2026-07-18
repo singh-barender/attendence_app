@@ -27,7 +27,17 @@
       "expo-secure-store",
       "expo-sharing",
       "expo-notifications",
-      "expo-background-task"
+      "expo-background-task",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "packagingOptions": {
+              "pickFirst": ["**/libworklets.so"]
+            }
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

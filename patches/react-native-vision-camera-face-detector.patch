@@ -1,0 +1,32 @@
+diff --git a/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridImageFaceDetector.kt b/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridImageFaceDetector.kt
+index 5d116a97595806aa7968e4174fb13e3dc3e973eb..47a7d4ec1ebb9faab0b91999dee660f2072aaa8c 100644
+--- a/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridImageFaceDetector.kt
++++ b/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridImageFaceDetector.kt
+@@ -22,16 +22,18 @@ class HybridImageFaceDetector(
+   )
+ 
+   private fun resolveInputImage(
+-    input: Any?
++    input: InputImage
+   ): String {
+-    return when (input) {
+-      is String -> input
+-      is Map<*, *> -> {
+-        val uri = input["uri"] as? String
+-        uri ?: throw IllegalArgumentException("Invalid image object: missing 'uri'")
+-      }
+-      else -> throw IllegalArgumentException("Invalid image type. Expected string or { uri }")
+-    }
++    // Nitrogen represents the TS union `string | number | ImageUri` as a
++    // Kotlin sealed class (InputImage.First/Second/Third), not as a raw
++    // String/Map — the upstream `is String`/`is Map<*, *>` checks this
++    // replaced can never match a sealed-class instance and always fell
++    // through to the "Invalid image type" branch, for every call,
++    // regardless of what was actually passed from JS. Unwrap via the
++    // sealed class's own generated accessors instead.
++    return input.asFirstOrNull()
++      ?: input.asThirdOrNull()?.uri
++      ?: throw IllegalArgumentException("Invalid image type. Expected string or { uri }")
+   }
+ 
+   private fun createInputImage(uri: String): MLInputImage {
