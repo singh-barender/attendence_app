@@ -29,7 +29,16 @@ export function assertValidAge(age: number | null | undefined): void {
 export async function assertEmailNotRegistered(email: string): Promise<void> {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
-    throw new Error('An account with this email already exists');
+    // Deliberately the same message regardless of whether that account
+    // finished registering (registrationStep 3) or dropped off mid-wizard —
+    // distinguishing the two here would leak account-completion state to
+    // whoever tried the email. Either way, the correct next step is the
+    // same: log in. A dropped-off registration resumes automatically from
+    // there (requirements.md's "Registration is resumable/idempotent per
+    // step" — AuthLoginScreen routes by `registrationStep`); registerStep1
+    // itself is a one-time `create` with no update path, so telling the
+    // caller to retry registration would just fail again.
+    throw new Error('An account with this email already exists — log in instead.');
   }
 }
 

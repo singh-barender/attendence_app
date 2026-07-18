@@ -60,7 +60,19 @@ export function Step1BasicInfoScreen({ navigation, route }: RootScreenProps<'Reg
       if (token && userId) {
         await saveToken(token);
         setAuthToken(token);
-        navigation.navigate('RegisterStep2', { userId, email: email.trim() });
+        // `replace`, not `navigate` — removes this screen from the stack so
+        // going back from Step 2 can't return to a stale, resubmittable copy
+        // of this form. registerStep1 is a one-time account `create`, unlike
+        // registerStep2/registerStep3 (which safely tolerate being re-run —
+        // see userService.assertRegistrationNotComplete): resubmitting it
+        // with the same email always fails with "account already exists,"
+        // confusingly, since the account in question is the user's own one
+        // they just created seconds ago. Resuming a genuinely abandoned
+        // registration already works via re-login (requirements.md's
+        // "Registration is resumable/idempotent per step" — AuthLoginScreen
+        // routes by `registrationStep`), so there's no legitimate reason to
+        // ever land back on this screen post-success.
+        navigation.replace('RegisterStep2', { userId, email: email.trim() });
       }
     },
   });
