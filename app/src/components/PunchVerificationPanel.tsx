@@ -146,6 +146,7 @@ export function PunchVerificationPanel({
               }
               liveness={faceFlow.liveness}
               isFaceAligned={faceFlow.isFaceAligned}
+              alignmentReason={faceFlow.alignmentReason}
               cameraLayoutSize={faceFlow.cameraLayoutSize}
               onCameraLayout={faceFlow.setCameraLayoutSize}
               isFaceTimedOut={faceFlow.isFaceTimedOut}

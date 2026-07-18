@@ -63,6 +63,7 @@ export function FaceEnrollmentCapture({
     nextAngle,
     capturedCount,
     isAligned,
+    alignmentReason,
     handleFrame,
     handleCapture,
     handleRetake,
@@ -113,6 +114,7 @@ export function FaceEnrollmentCapture({
           cameraLayoutSize={cameraLayoutSize}
           onCameraLayout={setCameraLayoutSize}
           isAligned={isAligned}
+          alignmentReason={alignmentReason}
           onCapture={handleCapture}
         />
       ) : (

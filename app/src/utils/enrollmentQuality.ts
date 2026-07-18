@@ -98,7 +98,10 @@ export const MIN_EYE_OPEN_PROBABILITY = 0.4;
  * alongside (not instead of) the landmark-geometry occlusion check. */
 export const MIN_MOUTH_SHARPNESS_RATIO = 0.35;
 
-const REJECTION_MESSAGES: Record<EnrollmentQualityRejectionReason, string> = {
+/** Exported so `liveFaceAlignment.ts`'s live (pre-capture) guide can reuse the
+ * exact same wording for the reasons it shares with this post-capture gate,
+ * rather than a second, driftable copy of the same strings. */
+export const REJECTION_MESSAGES: Record<EnrollmentQualityRejectionReason, string> = {
   'no-face': 'We couldn’t see your face — make sure it’s clearly visible and try again.',
   'multiple-faces': 'More than one face is in view — make sure only you are in the frame.',
   'too-dark': 'It’s too dark for a good capture — move somewhere brighter and try again.',

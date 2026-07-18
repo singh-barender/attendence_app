@@ -11,6 +11,7 @@ import { FaceCameraView } from '../platform/faceCamera';
 import type { LiveFaceInfo } from '../platform/faceCameraTypes';
 import type { useLivenessChallenge } from '../platform/livenessSignals';
 import { GLASS_PALETTES } from '../theme/glassPalette';
+import { getLiveAlignmentMessage, type LiveAlignmentReason } from '../utils/liveFaceAlignment';
 import {
   ALIGNMENT_OVAL_HEIGHT,
   ALIGNMENT_OVAL_WIDTH,
@@ -18,6 +19,15 @@ import {
 } from './FaceAlignmentMask';
 import { FeedbackBanner } from './FeedbackBanner';
 import { LivenessChallengeOverlay } from './LivenessChallengeOverlay';
+
+/** `no-face` is the ordinary "haven't positioned yet" starting state, not a
+ * problem — every other reason reflects something actually wrong with the
+ * current frame (covered, closed eyes, a second face, poor framing), shown
+ * as a real error so it's not mistaken for routine "just get in position"
+ * guidance (user-requested — matches the same treatment enrollment uses). */
+function isRealProblem(reason: LiveAlignmentReason | null): boolean {
+  return reason !== null && reason !== 'no-face';
+}
 
 /** Matches `LoginPunchInScreen`'s own challenge timeout — the overlay's
  * countdown must reflect the same deadline the caller's timeout effect
@@ -35,6 +45,10 @@ export interface FaceVerificationCameraProps {
   /** Whether the most recent frame was properly framed/frontal-facing —
    * drives the oval guide's color and which instruction copy shows. */
   isFaceAligned: boolean;
+  /** Why the live frame isn't aligned (null once it is, or before the
+   * detector has seen a face at all) — drives the specific guidance text
+   * below, instead of one generic hint regardless of cause. */
+  alignmentReason: LiveAlignmentReason | null;
   cameraLayoutSize: { width: number; height: number };
   onCameraLayout: (size: { width: number; height: number }) => void;
   isFaceTimedOut: boolean;
@@ -63,6 +77,7 @@ export function FaceVerificationCamera({
   onCameraError,
   liveness,
   isFaceAligned,
+  alignmentReason,
   cameraLayoutSize,
   onCameraLayout,
   isFaceTimedOut,
@@ -146,8 +161,12 @@ export function FaceVerificationCamera({
         />
       ) : (
         <FeedbackBanner
-          variant="info"
-          message="Align your face inside the oval, facing the camera directly."
+          variant={isRealProblem(alignmentReason) ? 'error' : 'info'}
+          message={
+            alignmentReason
+              ? getLiveAlignmentMessage(alignmentReason)
+              : 'Align your face inside the oval, facing the camera directly.'
+          }
         />
       )}
 
@@ -166,15 +185,17 @@ export function FaceVerificationCamera({
       ) : null}
 
       {/* Face-capture problems (lost face, closed eyes, blur, poor framing,
-          or even a server match miss) are shown as calm "let's try again"
-          guidance, never a red error — a first-time user reads a red banner
-          as "something is broken," when the fix is simply to re-present their
-          face (user-requested #6). The server still re-verifies every attempt
-          (ADR-007), so softening the wording changes tone, not security. */}
-      {faceError ? <FeedbackBanner variant="info" message={faceError} /> : null}
+          occlusion, or a server match miss) are shown as a red error —
+          reversing an earlier "soften to calm info-tone guidance" decision
+          (user-requested #6) in favor of a clear, visible error state
+          (user-requested, this round) so a real problem with the capture
+          (a covered face, closed eyes) reads as something to actually fix,
+          not routine framing guidance. The server still re-verifies every
+          attempt (ADR-007) regardless of how this is styled. */}
+      {faceError ? <FeedbackBanner variant="error" message={faceError} /> : null}
       {isFacePunchError && facePunchErrorMessage ? (
         <FeedbackBanner
-          variant="info"
+          variant="error"
           message="We couldn't confirm it's you this time. Face the camera in good lighting and try again — or use your fingerprint."
         />
       ) : null}

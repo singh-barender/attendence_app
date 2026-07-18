@@ -24,34 +24,44 @@ const FRONTAL_SAMPLE: LiveAlignmentSample = {
 
 describe('assessLiveAlignment', () => {
   it('accepts a centered, appropriately sized, on-axis frontal frame', () => {
-    expect(assessLiveAlignment(FRONTAL_SAMPLE)).toBe(true);
+    expect(assessLiveAlignment(FRONTAL_SAMPLE)).toEqual({ aligned: true, reason: null });
   });
 
   it('rejects when no face is present', () => {
-    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, hasFace: false, faceBounds: null })).toBe(
-      false,
-    );
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, hasFace: false, faceBounds: null })).toEqual({
+      aligned: false,
+      reason: 'no-face',
+    });
   });
 
   it('rejects when yaw is null (detector has not reported an angle yet)', () => {
-    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, yawAngle: null })).toBe(false);
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, yawAngle: null })).toEqual({
+      aligned: false,
+      reason: 'no-face',
+    });
   });
 
   it('rejects when more than one face is in frame', () => {
-    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, faceCount: 2 })).toBe(false);
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, faceCount: 2 })).toEqual({
+      aligned: false,
+      reason: 'multiple-faces',
+    });
   });
 
   it('rejects an occluded frame', () => {
-    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, isOccluded: true })).toBe(false);
+    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, isOccluded: true })).toEqual({
+      aligned: false,
+      reason: 'occluded',
+    });
   });
 
   it('rejects when an eye is covered/closed (below the shared open-probability floor)', () => {
     expect(
       assessLiveAlignment({ ...FRONTAL_SAMPLE, rightEyeOpen: MIN_EYE_OPEN_PROBABILITY - 0.01 }),
-    ).toBe(false);
+    ).toEqual({ aligned: false, reason: 'eyes-closed' });
     expect(
       assessLiveAlignment({ ...FRONTAL_SAMPLE, leftEyeOpen: MIN_EYE_OPEN_PROBABILITY - 0.01 }),
-    ).toBe(false);
+    ).toEqual({ aligned: false, reason: 'eyes-closed' });
   });
 
   it('accepts eye-open values at/above the floor, and a null eye value (not yet reported)', () => {
@@ -61,10 +71,10 @@ describe('assessLiveAlignment', () => {
         leftEyeOpen: MIN_EYE_OPEN_PROBABILITY,
         rightEyeOpen: MIN_EYE_OPEN_PROBABILITY,
       }),
-    ).toBe(true);
-    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, leftEyeOpen: null, rightEyeOpen: null })).toBe(
-      true,
-    );
+    ).toEqual({ aligned: true, reason: null });
+    expect(
+      assessLiveAlignment({ ...FRONTAL_SAMPLE, leftEyeOpen: null, rightEyeOpen: null }),
+    ).toEqual({ aligned: true, reason: null });
   });
 
   it('rejects a face that is too small', () => {
@@ -73,7 +83,7 @@ describe('assessLiveAlignment', () => {
         ...FRONTAL_SAMPLE,
         faceBounds: { x: 300, y: 220, width: 20, height: 20 },
       }),
-    ).toBe(false);
+    ).toEqual({ aligned: false, reason: 'too-small' });
   });
 
   it('rejects a face that is too close (fills more than the max frame ratio)', () => {
@@ -86,19 +96,19 @@ describe('assessLiveAlignment', () => {
         ...FRONTAL_SAMPLE,
         faceBounds: { x, y, width: tooClose, height: tooClose },
       }),
-    ).toBe(false);
+    ).toEqual({ aligned: false, reason: 'too-close' });
   });
 
   it('rejects a face that is off-center', () => {
     expect(
       assessLiveAlignment({ ...FRONTAL_SAMPLE, faceBounds: { ...CENTERED_BOUNDS, x: 0 } }),
-    ).toBe(false);
+    ).toEqual({ aligned: false, reason: 'off-center' });
   });
 
   it('rejects a frontal target when yaw is turned too far to one side', () => {
-    expect(assessLiveAlignment({ ...FRONTAL_SAMPLE, yawAngle: MAX_FRONTAL_YAW_DEGREES + 1 })).toBe(
-      false,
-    );
+    expect(
+      assessLiveAlignment({ ...FRONTAL_SAMPLE, yawAngle: MAX_FRONTAL_YAW_DEGREES + 1 }),
+    ).toEqual({ aligned: false, reason: 'wrong-angle' });
   });
 
   it('accepts a left-profile target once yaw is turned far enough negative', () => {
@@ -108,10 +118,11 @@ describe('assessLiveAlignment', () => {
       minYawDegrees: -Infinity,
       maxYawDegrees: -MIN_PROFILE_YAW_DEGREES,
     };
-    expect(assessLiveAlignment(leftSample)).toBe(true);
-    expect(assessLiveAlignment({ ...leftSample, yawAngle: -MIN_PROFILE_YAW_DEGREES + 1 })).toBe(
-      false,
-    );
+    expect(assessLiveAlignment(leftSample)).toEqual({ aligned: true, reason: null });
+    expect(assessLiveAlignment({ ...leftSample, yawAngle: -MIN_PROFILE_YAW_DEGREES + 1 })).toEqual({
+      aligned: false,
+      reason: 'wrong-angle',
+    });
   });
 
   it('accepts a right-profile target once yaw is turned far enough positive', () => {
@@ -121,9 +132,10 @@ describe('assessLiveAlignment', () => {
       minYawDegrees: MIN_PROFILE_YAW_DEGREES,
       maxYawDegrees: Infinity,
     };
-    expect(assessLiveAlignment(rightSample)).toBe(true);
-    expect(assessLiveAlignment({ ...rightSample, yawAngle: MIN_PROFILE_YAW_DEGREES - 1 })).toBe(
-      false,
-    );
+    expect(assessLiveAlignment(rightSample)).toEqual({ aligned: true, reason: null });
+    expect(assessLiveAlignment({ ...rightSample, yawAngle: MIN_PROFILE_YAW_DEGREES - 1 })).toEqual({
+      aligned: false,
+      reason: 'wrong-angle',
+    });
   });
 });

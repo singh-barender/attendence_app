@@ -50,7 +50,7 @@ import { assessEnrollmentQuality } from '../utils/enrollmentQuality';
 import { ANGLE_INFO } from '../utils/faceAngles';
 import { getPunchLocation } from '../utils/geolocation';
 import { generateIdempotencyKey } from '../utils/idempotencyKey';
-import { assessLiveAlignment } from '../utils/liveFaceAlignment';
+import { assessLiveAlignment, type LiveAlignmentReason } from '../utils/liveFaceAlignment';
 
 /** How long the camera waits for a completed blink before giving up. */
 export const FACE_CHALLENGE_TIMEOUT_MS = 15_000;
@@ -106,6 +106,11 @@ export function useFaceVerificationFlow(
    * looks purely at eye-open-probability transitions with no framing check
    * of its own. */
   const [isFaceAligned, setIsFaceAligned] = useState(false);
+  /** Why the most recent frame wasn't aligned (null once it is) — lets the
+   * screen show a specific "eyes closed" / "something is covering your
+   * face" message instead of one generic "align your face" hint regardless
+   * of cause (user-requested). */
+  const [alignmentReason, setAlignmentReason] = useState<LiveAlignmentReason | null>(null);
   const [cameraLayoutSize, setCameraLayoutSize] = useState({ width: 0, height: 0 });
   const lastAlignmentUpdateRef = useRef(0);
   const faceCaptureTriggeredRef = useRef(false);
@@ -157,6 +162,7 @@ export function useFaceVerificationFlow(
     setFaceError(null);
     setIsProcessingFace(false);
     setIsFaceAligned(false);
+    setAlignmentReason(null);
     liveness.reset();
     randomizeChallenge();
     setFaceAttemptId((id) => id + 1);
@@ -199,17 +205,31 @@ export function useFaceVerificationFlow(
   /**
    * Called on every detected frame by FaceCameraView. Frames only count
    * toward the blink challenge (`liveness.recordFrame`) while properly
-   * aligned — `assessLiveAlignment` is the same presence/size/centering/yaw
+   * framed — `assessLiveAlignment` is the same presence/size/centering/yaw
    * check `FaceEnrollmentCapture` uses to gate its Capture button, applied
    * here against the frontal-facing range (`ANGLE_INFO.frontal`) since
-   * verification, unlike enrollment, only ever asks for one angle. The
-   * alignment decision itself is computed fresh on every frame (so a
-   * misaligned frame can never sneak into the challenge window); only the
-   * `isFaceAligned` *state* that drives the oval's color is throttled, same
-   * cadence as enrollment's own debug readout, to avoid a render per frame.
+   * verification, unlike enrollment, only ever asks for one angle.
+   *
+   * Critically, a frame whose *only* problem is `eyes-closed` still counts
+   * (Round 8 review finding, a real bug, not just a UX preference): a blink
+   * challenge is defined as open→closed→open, so the one frame where eyes
+   * genuinely read as closed is exactly the frame `detectBlink` needs to see
+   * to register the closed phase. Excluding it — as gating purely on
+   * `alignment.aligned` did — meant that frame could never reach the
+   * liveness buffer at all, making a real blink structurally undetectable
+   * regardless of how many times the user actually blinked, and every
+   * attempt would run out the clock and time out. Every *other* rejection
+   * reason (no face, multiple faces, occluded, poor framing/angle) still
+   * excludes the frame, same as before — only eyes-closed is let through.
+   *
+   * The alignment decision itself is computed fresh on every frame (so a
+   * genuinely misaligned frame can never sneak into the challenge window);
+   * only the `isFaceAligned`/`alignmentReason` *state* that drives the
+   * oval's color and guidance text is throttled, same cadence as
+   * enrollment's own debug readout, to avoid a render per frame.
    */
   function handleFrame(info: LiveFaceInfo) {
-    const aligned = assessLiveAlignment({
+    const alignment = assessLiveAlignment({
       hasFace: info.hasFace,
       faceCount: info.faceCount,
       faceBounds: info.bounds,
@@ -222,21 +242,20 @@ export function useFaceVerificationFlow(
       leftEyeOpen: info.leftEyeOpen,
       rightEyeOpen: info.rightEyeOpen,
     });
-    if (aligned) {
+    if (alignment.aligned || alignment.reason === 'eyes-closed') {
       liveness.recordFrame(info, Date.now());
     }
 
-    // Only the alignment *state* that colors the oval is throttled (a render
-    // per frame would be wasteful). `faceError` is deliberately NOT touched
-    // here: it's for capture/verification failures (set by handleFaceFailure,
-    // cleared on retry), kept separate from live guidance. Occlusion, a
-    // misframe, closed eyes, or a second face all make `aligned` false, which
-    // reddens the oval and shows the "align your face" hint on its own — no
-    // per-frame error text needed.
+    // Only the alignment *state* that colors the oval (and the reason text
+    // below it) is throttled (a render per frame would be wasteful).
+    // `faceError` is deliberately NOT touched here: it's for capture/
+    // verification failures (set by handleFaceFailure, cleared on retry),
+    // kept separate from live guidance.
     const now = Date.now();
     if (now - lastAlignmentUpdateRef.current >= FRAME_STATE_THROTTLE_MS) {
       lastAlignmentUpdateRef.current = now;
-      setIsFaceAligned(aligned);
+      setIsFaceAligned(alignment.aligned);
+      setAlignmentReason(alignment.reason);
     }
   }
 
@@ -368,6 +387,7 @@ export function useFaceVerificationFlow(
     isProcessingFace: isProcessingFace || isPunchingInFace,
     faceFailureCount,
     isFaceAligned,
+    alignmentReason,
     cameraLayoutSize,
     setCameraLayoutSize,
     liveness,

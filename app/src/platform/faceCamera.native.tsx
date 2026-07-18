@@ -20,7 +20,8 @@
  * modular, single-responsibility files").
  */
 
-import { forwardRef, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { Image } from 'react-native-nitro-image';
 import {
   Camera,
@@ -70,9 +71,32 @@ export function useFaceCameraPermission() {
   return { hasPermission, requestPermission, hasDevice: device !== undefined };
 }
 
+/**
+ * Tracks whether the app itself is currently foregrounded — react-native-
+ * vision-camera's own docs are explicit that `<Camera isActive>` must
+ * reflect this (screen focus/app foreground state), not a hardcoded `true`:
+ * when the app backgrounds, the OS can reclaim the camera hardware out from
+ * under a still-"active" session, and resuming it later throws a fatal
+ * `ActiveCameraSessionSingle.updateCameraState` error (found live: backgrounding
+ * the app mid-capture and returning to it crashed the camera view). Passing
+ * the real foreground state lets the library cleanly release/reacquire the
+ * session across the transition instead.
+ */
+function useIsAppActive(): boolean {
+  const [isActive, setIsActive] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      setIsActive(nextState === 'active');
+    });
+    return () => subscription.remove();
+  }, []);
+  return isActive;
+}
+
 export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCameraViewProps>(
   function FaceCameraView({ onFrame, onError }, ref) {
     const device = useCameraDevice('front');
+    const isAppActive = useIsAppActive();
     const photoOutput = usePhotoOutput({
       // Matches frameOutput's VGA_4_3 aspect ratio (not its resolution —
       // photos are captured at a higher tier for embedding quality) so a
@@ -221,7 +245,7 @@ export const FaceCameraView = forwardRef<FaceCameraViewHandle<Image>, FaceCamera
       <Camera
         style={{ flex: 1 }}
         device={device}
-        isActive
+        isActive={isAppActive}
         outputs={[photoOutput, frameOutput]}
         {...(onError ? { onError } : {})}
       />

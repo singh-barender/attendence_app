@@ -92,9 +92,28 @@ export class LivenessChallengeSession {
    * mutation so the server can independently re-judge the same challenge
    * (architecture-review-2026-07-16.md's F1) rather than trusting this
    * class's own client-side `detected` boolean. A copy, not the live array —
-   * callers must not be able to mutate this session's internal state. */
+   * callers must not be able to mutate this session's internal state.
+   *
+   * Timestamps are re-based to be relative to this window's first sample
+   * (not the raw epoch ms `addFrame` was called with) — `LivenessSampleInput
+   * .timestampMs` is a GraphQL `Int` (32-bit signed, max ~2.1 billion), while
+   * `Date.now()` epoch-ms values (~1.78 trillion as of 2026) are always far
+   * outside that range. Sending the raw epoch value made every real
+   * `punchInFace` call fail GraphQL variable-coercion validation before the
+   * resolver ever ran (found live: repeated "couldn't confirm it's you"
+   * failures traced to a silent "Graphql validation error" in the backend
+   * log, not an actual liveness/match rejection). `detectBlink` and the other
+   * `packages/liveness` detectors only ever compare samples' timestamps
+   * *relative to each other* (see their own tests, which already use small
+   * numbers like 0/100/200) — re-basing here loses no information they need,
+   * since `addFrame`'s own windowing above still runs on the original raw
+   * timestamps internally. */
   getSamples(): readonly LivenessSample[] {
-    return [...this.samples];
+    const firstTimestampMs = this.samples[0]?.timestampMs ?? 0;
+    return this.samples.map((sample) => ({
+      ...sample,
+      timestampMs: sample.timestampMs - firstTimestampMs,
+    }));
   }
 }
 

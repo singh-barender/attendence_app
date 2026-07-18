@@ -11,6 +11,7 @@ import type { LiveFaceInfo } from '../platform/faceCameraTypes';
 import { getErrorMessage } from '../services/graphqlError';
 import { GLASS_PALETTES } from '../theme/glassPalette';
 import { ANGLE_INFO, type Angle } from '../utils/faceAngles';
+import { getLiveAlignmentMessage, type LiveAlignmentReason } from '../utils/liveFaceAlignment';
 import {
   ALIGNMENT_OVAL_HEIGHT,
   ALIGNMENT_OVAL_WIDTH,
@@ -26,7 +27,19 @@ export interface FaceEnrollmentCameraViewProps {
   cameraLayoutSize: { width: number; height: number };
   onCameraLayout: (size: { width: number; height: number }) => void;
   isAligned: boolean;
+  /** Why the live frame isn't aligned (null once it is, or before the
+   * detector has seen a face at all) — drives the specific guidance text
+   * below, instead of one generic hint regardless of cause. */
+  alignmentReason: LiveAlignmentReason | null;
   onCapture: () => void;
+}
+
+/** `no-face` is the ordinary "haven't positioned yet" starting state, not a
+ * problem — every other reason reflects something actually wrong with the
+ * current frame (covered, closed eyes, a second face, poor framing), shown
+ * in red so it reads as a real issue to fix (user-requested). */
+function isRealProblem(reason: LiveAlignmentReason | null): boolean {
+  return reason !== null && reason !== 'no-face';
 }
 
 export function FaceEnrollmentCameraView({
@@ -38,21 +51,23 @@ export function FaceEnrollmentCameraView({
   cameraLayoutSize,
   onCameraLayout,
   isAligned,
+  alignmentReason,
   onCapture,
 }: FaceEnrollmentCameraViewProps) {
   const { resolvedTheme } = useThemePreference();
   const palette = GLASS_PALETTES[resolvedTheme];
+  const hasProblem = isRealProblem(alignmentReason);
 
   return (
     <>
       <Text
         style={{
-          color: frameStats.face.isOccluded ? palette.danger : palette.ink,
+          color: hasProblem ? palette.danger : palette.ink,
           fontWeight: '600',
         }}
       >
-        {frameStats.face.isOccluded
-          ? 'Something is covering your face. Please ensure your face is clearly visible.'
+        {hasProblem && alignmentReason
+          ? getLiveAlignmentMessage(alignmentReason)
           : ANGLE_INFO[nextAngle].instruction}
       </Text>
       <YStack

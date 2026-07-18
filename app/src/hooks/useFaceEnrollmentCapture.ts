@@ -75,7 +75,7 @@ export function useFaceEnrollmentCapture(onFinish: (embeddings: FaceEnrollmentEm
   // Drives the live guide overlay/capture gating — reuses the same
   // throttled `frameStats` the debug readout already computes, so this
   // adds no extra per-frame state or re-render pressure.
-  const isAligned = nextAngle
+  const liveAlignment = nextAngle
     ? assessLiveAlignment({
         hasFace: frameStats.face.hasFace,
         faceCount: frameStats.face.faceCount,
@@ -89,7 +89,9 @@ export function useFaceEnrollmentCapture(onFinish: (embeddings: FaceEnrollmentEm
         leftEyeOpen: frameStats.face.leftEyeOpen,
         rightEyeOpen: frameStats.face.rightEyeOpen,
       })
-    : false;
+    : { aligned: false, reason: null };
+  const isAligned = liveAlignment.aligned;
+  const alignmentReason = liveAlignment.reason;
 
   async function handleCapture() {
     if (!nextAngle) {
@@ -165,6 +167,7 @@ export function useFaceEnrollmentCapture(onFinish: (embeddings: FaceEnrollmentEm
     nextAngle,
     capturedCount,
     isAligned,
+    alignmentReason,
     handleFrame,
     handleCapture,
     handleRetake,
