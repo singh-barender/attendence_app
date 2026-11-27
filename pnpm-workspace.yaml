@@ -32,7 +32,7 @@ catalog:
   typescript: ^6.0.3
   "@biomejs/biome": ^2.5.2
   turbo: ^2.10.4
-  vitest: ^4.1.10
+  vitest: ^5.0.5
   prisma: ^7.8.0
   "@prisma/client": ^7.8.0
   "@prisma/adapter-better-sqlite3": ^7.8.0
@@ -42,7 +42,7 @@ catalog:
   # Pinned to the 24.x line to match the Node 24 runtime this project targets
   # (ADR-003) — "latest" on npm is 26.x, matching a newer Node major, not ours.
   "@types/node": ^24.13.2
-  fastify: ^5.10.0
+  fastify: ^5.12.5
   mercurius: ^16.9.0
   "@pothos/core": ^4.13.0
   "@pothos/plugin-prisma": ^4.14.3
